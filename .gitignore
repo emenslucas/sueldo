@@ -3,6 +3,9 @@
 # dependencies
 /node_modules
 
+# puppeteer
+.cache/puppeteer/
+
 # next.js
 /.next/
 /out/
