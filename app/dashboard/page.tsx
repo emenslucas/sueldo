@@ -157,7 +157,6 @@ export default function Dashboard() {
 
   // Estados para modales
   const [showCalculatorModal, setShowCalculatorModal] = useState(false)
-  
 
   // Ref para el unsubscribe de Firestore
   const [unsubscribeExpenses, setUnsubscribeExpenses] = useState<(() => void) | null>(null)
@@ -183,7 +182,7 @@ export default function Dashboard() {
   // Calcular el monto total destinado al ahorro
   const totalSavings = useMemo(() => {
     if (!config) return 0
-    
+
     return Object.entries(config.categories)
       .filter(([key]) => isAhorroCategory(key))
       .reduce((total, [_, category]) => {
@@ -1115,9 +1114,7 @@ export default function Dashboard() {
                       {isAhorro ? (
                         <>
                           <div className="text-lg sm:text-2xl font-bold">${formatCurrency(data.available)}</div>
-                          <p className="text-xs text-muted-foreground">
-                            {category.percentage}% de tu sueldo neto
-                          </p>
+                          <p className="text-xs text-muted-foreground">{category.percentage}% de tu sueldo neto</p>
                           <div className="mt-4">
                             <Button
                               variant="outline"
@@ -1423,4 +1420,38 @@ export default function Dashboard() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edit-amount\">M
+                  <Label htmlFor="edit-amount">Monto</Label>
+                  <Input
+                    id="edit-amount"
+                    type="text"
+                    value={formatForInput(editingExpense.amount)}
+                    onChange={(e) => {
+                      const formatted = formatInputValue(e.target.value)
+                      setEditingExpense({
+                        ...editingExpense,
+                        amount: parseFormattedValue(formatted),
+                      })
+                    }}
+                    placeholder="Ej: 1.500 o 1.500,50"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-description">Descripción</Label>
+                  <Input
+                    id="edit-description"
+                    value={editingExpense.description}
+                    onChange={(e) => setEditingExpense({ ...editingExpense, description: e.target.value })}
+                    placeholder="Descripción del gasto"
+                  />
+                </div>
+                <Button onClick={updateExpense} className="w-full" size="lg">
+                  Actualizar Gasto
+                </Button>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      </main>
+    </div>
+  )
+}
