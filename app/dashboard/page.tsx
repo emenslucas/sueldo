@@ -884,7 +884,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       {/* Mensajes de error y éxito optimizados */}
       {error && (
-        <div className="fixed top-4 right-4 z-50 bg-destructive/10 border border-destructive/20 rounded-lg p-4 shadow-lg max-w-md animate-in slide-in-from-right">
+        <div className="fixed top-4 right-4 z-[100] bg-destructive/10 border border-destructive/20 rounded-lg p-4 shadow-lg max-w-md animate-in slide-in-from-right">
           <div className="flex items-center space-x-2">
             <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
             <p className="text-sm text-destructive flex-1">{error}</p>
@@ -896,7 +896,7 @@ export default function Dashboard() {
       )}
 
       {success && (
-        <div className="fixed top-4 right-4 z-50 bg-muted border rounded-lg p-4 shadow-lg max-w-md animate-in slide-in-from-right">
+        <div className="fixed top-4 right-4 z-[100] bg-muted border rounded-lg p-4 shadow-lg max-w-md animate-in slide-in-from-right">
           <div className="flex items-center space-x-2">
             <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
             <p className="text-sm flex-1">{success}</p>
@@ -1060,47 +1060,74 @@ export default function Dashboard() {
 
                 <Card className="p-4 border-dashed">
                   <h4 className="text-md font-medium mb-3">Agregar Nueva Categoría</h4>
-                  <div className="flex items-center space-x-2">
-                    <Select value={newCategoryIcon} onValueChange={setNewCategoryIcon}>
-                      <SelectTrigger className="w-16">
-                        <SelectValue>
-                          {React.createElement(iconMap[newCategoryIcon], { className: "h-4 w-4" })}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableIcons.map((iconItem) => (
-                          <SelectItem key={iconItem.name} value={iconItem.name}>
-                            <div className="flex items-center space-x-2">
-                              {React.createElement(iconItem.icon, { className: "h-4 w-4" })}
-                              <span>{iconItem.label}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      placeholder="Nombre de categoría"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      className="flex-1"
-                    />
-                    <Input
-                      type="text"
-                      placeholder="0"
-                      value={newCategoryPercentage}
-                      onChange={(e) => handleAmountChange(e.target.value, setNewCategoryPercentage)}
-                      className="w-20"
-                    />
-                    <span className="text-sm text-muted-foreground">%</span>
-                    <Button onClick={addNewCategory} size="sm">
-                      <Plus className="h-4 w-4" />
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-muted-foreground">Nombre</label>
+                      <Input
+                        placeholder="Nombre de categoría"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-muted-foreground">Icono</label>
+                        <Select value={newCategoryIcon} onValueChange={setNewCategoryIcon}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue>
+                              <div className="flex items-center space-x-2">
+                                {React.createElement(iconMap[newCategoryIcon], { className: "h-4 w-4" })}
+                                <span className="text-sm">
+                                  {availableIcons.find((icon) => icon.name === newCategoryIcon)?.label || "Icono"}
+                                </span>
+                              </div>
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableIcons.map((iconItem) => (
+                              <SelectItem key={iconItem.name} value={iconItem.name}>
+                                <div className="flex items-center space-x-2">
+                                  {React.createElement(iconItem.icon, { className: "h-4 w-4" })}
+                                  <span>{iconItem.label}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-muted-foreground">Porcentaje</label>
+                        <div className="relative">
+                          <Input
+                            type="text"
+                            placeholder="0"
+                            value={newCategoryPercentage}
+                            onChange={(e) => handleAmountChange(e.target.value, setNewCategoryPercentage)}
+                            className="w-full pr-8"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                            %
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button onClick={addNewCategory} className="w-full" size="sm" variant="outline">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Agregar Categoría
                     </Button>
                   </div>
                 </Card>
 
-                <Button onClick={saveConfig} className="w-full" size="lg">
-                  Guardar Configuración
-                </Button>
+                <div className="pt-4 border-t">
+                  <Button onClick={saveConfig} className="w-full" size="lg">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Guardar Configuración
+                  </Button>
+                </div>
               </div>
             </div>
           )}

@@ -70,14 +70,15 @@ export async function GET(request: Request) {
     // Ordenar datos por fecha (más reciente primero)
     apiData.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime())
 
-    // Calcular los meses que necesitamos (hacia atrás desde ahora)
+    // CORRECCIÓN: Calcular los meses que necesitamos considerando el retraso en publicación
     const now = new Date()
     const inflationRates: Array<{ rate: number; month: string; year: number; date: string }> = []
     const missingMonths: string[] = []
 
     for (let i = 1; i <= months; i++) {
-      // Ir hacia atrás mes por mes
-      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      // Ir hacia atrás mes por mes, pero agregando +1 por el retraso en publicación
+      // Si estamos en junio y piden 1 mes, necesitamos abril (no mayo)
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i - 1, 1)
       const year = targetDate.getFullYear()
       const monthNum = targetDate.getMonth() + 1
       const monthName = monthNames[targetDate.getMonth()]
@@ -115,10 +116,6 @@ export async function GET(request: Request) {
       data: inflationRates,
       missingMonths: missingMonths.length > 0 ? missingMonths : undefined,
       source: "Argentina Datos - INDEC",
-      note:
-        missingMonths.length > 0
-          ? `Datos oficiales de Argentina Datos. Los datos para ${missingMonths.join(", ")} aún no están disponibles (pueden publicarse con retraso).`
-          : "Datos oficiales de inflación mensual de Argentina Datos.",
       totalMonths: inflationRates.length,
       requestedMonths: months,
     })

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency, formatInputValue, parseFormattedValue } from "@/lib/formatters"
-import { Calculator, TrendingUp, Loader2, AlertCircle, Info } from "lucide-react"
+import { Calculator, TrendingUp, Loader2, AlertCircle, CheckCircle, AlertTriangle, XCircle } from "lucide-react"
 
 interface InflationData {
   rate: number
@@ -35,7 +35,6 @@ export function SalaryCalculator() {
   const [loadingInflation, setLoadingInflation] = useState(false)
   const [autoInflationEnabled, setAutoInflationEnabled] = useState(false)
   const [inflationError, setInflationError] = useState<string | null>(null)
-  const [inflationInfo, setInflationInfo] = useState<string | null>(null)
 
   const calculate = () => {
     const oldAmount = parseFormattedValue(oldSalary)
@@ -107,13 +106,21 @@ export function SalaryCalculator() {
 
     // Ajustar array de inflaciones según cantidad de meses
     if (months > 0) {
-      // Calcular los meses correspondientes (hacia atrás desde ahora)
+      // Crear un mapa de los datos existentes por mes/año
+      const existingDataMap = new Map<string, string>()
+      monthlyInflations.forEach((inf) => {
+        const key = `${inf.month}-${inf.year}`
+        existingDataMap.set(key, inf.value)
+      })
+
+      // Calcular los meses correspondientes considerando el retraso en publicación
       const now = new Date()
       const newInflations = Array(months)
         .fill(null)
         .map((_, index) => {
-          // Ir hacia atrás: index 0 = hace 'months' meses, index 'months-1' = hace 1 mes
-          const monthsBack = months - index
+          // Ir hacia atrás: index 0 = hace 'months+1' meses, index 'months-1' = hace 2 meses
+          // +1 porque los datos del mes anterior se publican a mediados del mes siguiente
+          const monthsBack = months - index + 1
           const targetDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
 
           const monthNames = [
@@ -131,10 +138,14 @@ export function SalaryCalculator() {
             "Diciembre",
           ]
 
+          const month = monthNames[targetDate.getMonth()]
+          const year = targetDate.getFullYear()
+          const key = `${month}-${year}`
+
           return {
-            value: monthlyInflations[index]?.value || "",
-            month: monthNames[targetDate.getMonth()],
-            year: targetDate.getFullYear(),
+            value: existingDataMap.get(key) || "", // Mantener datos existentes
+            month,
+            year,
           }
         })
       setMonthlyInflations(newInflations)
@@ -142,7 +153,6 @@ export function SalaryCalculator() {
 
     // Limpiar errores y estado automático
     setInflationError(null)
-    setInflationInfo(null)
     setAutoInflationEnabled(false)
   }
 
@@ -159,7 +169,6 @@ export function SalaryCalculator() {
 
     setLoadingInflation(true)
     setInflationError(null)
-    setInflationInfo(null)
 
     try {
       const response = await fetch(`/api/inflation?months=${months}`)
@@ -173,35 +182,14 @@ export function SalaryCalculator() {
         }))
         setMonthlyInflations(newInflations)
         setAutoInflationEnabled(true)
-
-        // Mostrar información sobre datos faltantes
-        if (data.missingMonths && data.missingMonths.length > 0) {
-          setInflationInfo(
-            `Se cargaron ${data.totalMonths} de ${data.requestedMonths} meses. Los datos para ${data.missingMonths.join(", ")} aún no están disponibles (se publican con retraso).`,
-          )
-        } else {
-          setInflationInfo(`Se cargaron todos los ${data.totalMonths} meses solicitados.`)
-        }
       } else {
         setInflationError(data.error || "No se pudieron obtener datos de inflación")
       }
     } catch (error) {
       console.error("Error loading inflation data:", error)
-      setInflationError("Error al conectar con el servidor de datos de inflación")
+      setInflationError("Error al conectar con el servidor")
     } finally {
       setLoadingInflation(false)
-    }
-  }
-
-  const getResultColor = () => {
-    if (!inflationResult) return ""
-
-    if (inflationResult.coveragePercentage >= 100) {
-      return "text-green-700 dark:text-green-300"
-    } else if (inflationResult.coveragePercentage >= 70) {
-      return "text-yellow-700 dark:text-yellow-300"
-    } else {
-      return "text-red-700 dark:text-red-300"
     }
   }
 
@@ -210,19 +198,30 @@ export function SalaryCalculator() {
 
     if (inflationResult.coveragePercentage >= 100) {
       return (
-        <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-          ✅ Cubre la inflación
-        </Badge>
+        <div className="flex items-center justify-center">
+          <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 px-4 py-2 text-sm font-medium border border-green-300 dark:border-green-700">
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Cubre la inflación
+          </Badge>
+        </div>
       )
     } else if (inflationResult.coveragePercentage >= 70) {
       return (
-        <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-          ⚠️ Cubre parcialmente
-        </Badge>
+        <div className="flex items-center justify-center">
+          <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 px-4 py-2 text-sm font-medium border border-yellow-300 dark:border-yellow-700">
+            <AlertTriangle className="h-4 w-4 mr-2" />
+            Cubre parcialmente
+          </Badge>
+        </div>
       )
     } else {
       return (
-        <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">❌ No cubre la inflación</Badge>
+        <div className="flex items-center justify-center">
+          <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 px-4 py-2 text-sm font-medium border border-red-300 dark:border-red-700">
+            <XCircle className="h-4 w-4 mr-2" />
+            No cubre la inflación
+          </Badge>
+        </div>
       )
     }
   }
@@ -277,32 +276,25 @@ export function SalaryCalculator() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Inflación mensual (%)</Label>
-                <div className="flex items-center space-x-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={loadAutomaticInflation}
-                    disabled={loadingInflation}
-                  >
-                    {loadingInflation ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Cargando...
-                      </>
-                    ) : (
-                      <>
-                        <TrendingUp className="h-4 w-4 mr-2" />
-                        Usar datos INDEC
-                      </>
-                    )}
-                  </Button>
-                  {autoInflationEnabled && (
-                    <Badge variant="secondary" className="text-xs">
-                      Datos oficiales INDEC
-                    </Badge>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={loadAutomaticInflation}
+                  disabled={loadingInflation}
+                >
+                  {loadingInflation ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Cargando...
+                    </>
+                  ) : (
+                    <>
+                      <TrendingUp className="h-4 w-4 mr-2" />
+                      Usar datos INDEC
+                    </>
                   )}
-                </div>
+                </Button>
               </div>
 
               {inflationError && (
@@ -310,15 +302,6 @@ export function SalaryCalculator() {
                   <div className="flex items-center space-x-2">
                     <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
                     <p className="text-sm text-red-600 dark:text-red-400">{inflationError}</p>
-                  </div>
-                </div>
-              )}
-
-              {inflationInfo && (
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                    <p className="text-sm text-blue-600 dark:text-blue-400">{inflationInfo}</p>
                   </div>
                 </div>
               )}
@@ -333,18 +316,12 @@ export function SalaryCalculator() {
                       type="text"
                       value={inflation.value}
                       onChange={(e) => updateInflation(index, e.target.value)}
-                      placeholder={inflation.value ? "Cargado" : "Sin datos"}
+                      placeholder="0.0"
                       className="text-sm"
                     />
                   </div>
                 ))}
               </div>
-              {autoInflationEnabled && (
-                <p className="text-xs text-muted-foreground">
-                  💡 Datos cargados automáticamente desde Argentina Datos (INDEC). Los campos vacíos indican que esos
-                  datos aún no están disponibles. Puedes completarlos manualmente si los conoces.
-                </p>
-              )}
             </div>
           )}
 
@@ -355,7 +332,7 @@ export function SalaryCalculator() {
 
           {inflationResult && (
             <div className="space-y-4">
-              <div className="flex justify-center">{getResultBadge()}</div>
+              {getResultBadge()}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-center">
@@ -402,7 +379,8 @@ export function SalaryCalculator() {
                   ${formatCurrency(inflationResult.shouldBeSalary)}
                 </p>
                 <p className="text-xs text-purple-600 dark:text-purple-400 text-center mt-1">
-                  Diferencia: ${formatCurrency(inflationResult.shouldBeSalary - parseFormattedValue(newSalary))}
+                  Diferencia: {inflationResult.shouldBeSalary > parseFormattedValue(newSalary) ? "+" : ""}$
+                  {formatCurrency(Math.abs(inflationResult.shouldBeSalary - parseFormattedValue(newSalary)))}
                 </p>
               </div>
             </div>
