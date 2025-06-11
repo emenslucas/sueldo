@@ -7,13 +7,19 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency, formatInputValue, parseFormattedValue } from "@/lib/formatters"
-import { Calculator, TrendingUp } from "lucide-react"
+import { Calculator, TrendingUp, Loader2, AlertCircle, Info } from "lucide-react"
+
+interface InflationData {
+  rate: number
+  month: string
+  year: number
+}
 
 export function SalaryCalculator() {
   const [oldSalary, setOldSalary] = useState("")
   const [newSalary, setNewSalary] = useState("")
   const [monthsSinceIncrease, setMonthsSinceIncrease] = useState("")
-  const [monthlyInflations, setMonthlyInflations] = useState<string[]>([""])
+  const [monthlyInflations, setMonthlyInflations] = useState<Array<{ value: string; month: string; year: number }>>([])
   const [result, setResult] = useState<{
     percentage: number
     increase: number
@@ -25,6 +31,11 @@ export function SalaryCalculator() {
     coveragePercentage: number
     shouldBeSalary: number
   } | null>(null)
+
+  const [loadingInflation, setLoadingInflation] = useState(false)
+  const [autoInflationEnabled, setAutoInflationEnabled] = useState(false)
+  const [inflationError, setInflationError] = useState<string | null>(null)
+  const [inflationInfo, setInflationInfo] = useState<string | null>(null)
 
   const calculate = () => {
     const oldAmount = parseFormattedValue(oldSalary)
@@ -44,19 +55,19 @@ export function SalaryCalculator() {
     })
 
     if (months > 0) {
-      // Validar que tengamos inflación para todos los meses
+      // Validar que tengamos inflación para al menos algunos meses
       const validInflations = monthlyInflations
         .slice(0, months)
-        .filter((inf) => inf.trim() !== "" && !isNaN(Number.parseFloat(inf.replace(",", "."))))
+        .filter((inf) => inf.value.trim() !== "" && !isNaN(Number.parseFloat(inf.value.replace(",", "."))))
 
-      if (validInflations.length !== months) {
+      if (validInflations.length === 0) {
         return
       }
 
-      // Calcular inflación acumulada (interés compuesto)
+      // Calcular inflación acumulada solo con los datos disponibles
       let accumulatedInflation = 1
       validInflations.forEach((inf) => {
-        const monthlyRate = Number.parseFloat(inf.replace(",", ".")) / 100
+        const monthlyRate = Number.parseFloat(inf.value.replace(",", ".")) / 100
         accumulatedInflation *= 1 + monthlyRate
       })
       accumulatedInflation = (accumulatedInflation - 1) * 100
@@ -96,17 +107,90 @@ export function SalaryCalculator() {
 
     // Ajustar array de inflaciones según cantidad de meses
     if (months > 0) {
+      // Calcular los meses correspondientes (hacia atrás desde ahora)
+      const now = new Date()
       const newInflations = Array(months)
-        .fill("")
-        .map((_, index) => monthlyInflations[index] || "")
+        .fill(null)
+        .map((_, index) => {
+          // Ir hacia atrás: index 0 = hace 'months' meses, index 'months-1' = hace 1 mes
+          const monthsBack = months - index
+          const targetDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
+
+          const monthNames = [
+            "Enero",
+            "Febrero",
+            "Marzo",
+            "Abril",
+            "Mayo",
+            "Junio",
+            "Julio",
+            "Agosto",
+            "Septiembre",
+            "Octubre",
+            "Noviembre",
+            "Diciembre",
+          ]
+
+          return {
+            value: monthlyInflations[index]?.value || "",
+            month: monthNames[targetDate.getMonth()],
+            year: targetDate.getFullYear(),
+          }
+        })
       setMonthlyInflations(newInflations)
     }
+
+    // Limpiar errores y estado automático
+    setInflationError(null)
+    setInflationInfo(null)
+    setAutoInflationEnabled(false)
   }
 
   const updateInflation = (index: number, value: string) => {
     const newInflations = [...monthlyInflations]
-    newInflations[index] = value
+    newInflations[index] = { ...newInflations[index], value }
     setMonthlyInflations(newInflations)
+    setAutoInflationEnabled(false) // Desactivar modo automático si edita manualmente
+  }
+
+  const loadAutomaticInflation = async () => {
+    const months = Number.parseInt(monthsSinceIncrease)
+    if (months <= 0) return
+
+    setLoadingInflation(true)
+    setInflationError(null)
+    setInflationInfo(null)
+
+    try {
+      const response = await fetch(`/api/inflation?months=${months}`)
+      const data = await response.json()
+
+      if (data.success && data.data) {
+        // Cargar todos los datos disponibles
+        const newInflations = monthlyInflations.map((inf, index) => ({
+          ...inf,
+          value: data.data[index]?.rate?.toString() || "",
+        }))
+        setMonthlyInflations(newInflations)
+        setAutoInflationEnabled(true)
+
+        // Mostrar información sobre datos faltantes
+        if (data.missingMonths && data.missingMonths.length > 0) {
+          setInflationInfo(
+            `Se cargaron ${data.totalMonths} de ${data.requestedMonths} meses. Los datos para ${data.missingMonths.join(", ")} aún no están disponibles (se publican con retraso).`,
+          )
+        } else {
+          setInflationInfo(`Se cargaron todos los ${data.totalMonths} meses solicitados.`)
+        }
+      } else {
+        setInflationError(data.error || "No se pudieron obtener datos de inflación")
+      }
+    } catch (error) {
+      console.error("Error loading inflation data:", error)
+      setInflationError("Error al conectar con el servidor de datos de inflación")
+    } finally {
+      setLoadingInflation(false)
+    }
   }
 
   const getResultColor = () => {
@@ -191,21 +275,76 @@ export function SalaryCalculator() {
 
           {Number.parseInt(monthsSinceIncrease) > 0 && (
             <div className="space-y-3">
-              <Label>Inflación mensual de cada mes (%)</Label>
+              <div className="flex items-center justify-between">
+                <Label>Inflación mensual (%)</Label>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={loadAutomaticInflation}
+                    disabled={loadingInflation}
+                  >
+                    {loadingInflation ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Cargando...
+                      </>
+                    ) : (
+                      <>
+                        <TrendingUp className="h-4 w-4 mr-2" />
+                        Usar datos INDEC
+                      </>
+                    )}
+                  </Button>
+                  {autoInflationEnabled && (
+                    <Badge variant="secondary" className="text-xs">
+                      Datos oficiales INDEC
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {inflationError && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                    <p className="text-sm text-red-600 dark:text-red-400">{inflationError}</p>
+                  </div>
+                </div>
+              )}
+
+              {inflationInfo && (
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <p className="text-sm text-blue-600 dark:text-blue-400">{inflationInfo}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {monthlyInflations.slice(0, Number.parseInt(monthsSinceIncrease)).map((inflation, index) => (
                   <div key={index} className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Mes {index + 1}</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      {inflation.month} {inflation.year}
+                    </Label>
                     <Input
                       type="text"
-                      value={inflation}
+                      value={inflation.value}
                       onChange={(e) => updateInflation(index, e.target.value)}
-                      placeholder="Ej: 4,2"
+                      placeholder={inflation.value ? "Cargado" : "Sin datos"}
                       className="text-sm"
                     />
                   </div>
                 ))}
               </div>
+              {autoInflationEnabled && (
+                <p className="text-xs text-muted-foreground">
+                  💡 Datos cargados automáticamente desde Argentina Datos (INDEC). Los campos vacíos indican que esos
+                  datos aún no están disponibles. Puedes completarlos manualmente si los conoces.
+                </p>
+              )}
             </div>
           )}
 

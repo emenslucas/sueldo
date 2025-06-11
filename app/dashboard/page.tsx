@@ -63,14 +63,29 @@ import {
   TrendingUp,
   Calculator,
   Search,
+  Repeat,
+  ArrowRightCircle,
+  ArrowLeftCircle,
 } from "lucide-react"
 import { SalaryCalculator } from "@/components/salary-calculator"
 import { DraggableCategory } from "@/components/draggable-category"
+import { Switch } from "@/components/ui/switch"
 
 interface Category {
   name: string
   percentage: number
   icon: string
+}
+
+interface Transaction {
+  id: string
+  type: "income" | "expense"
+  category?: string
+  amount: number
+  description: string
+  date: string
+  isRecurring?: boolean
+  recurringDay?: number
 }
 
 interface UserConfig {
@@ -80,14 +95,6 @@ interface UserConfig {
     [key: string]: Category
   }
   categoryOrder?: string[]
-}
-
-interface Expense {
-  id: string
-  category: string
-  amount: number
-  description: string
-  date: string
 }
 
 const defaultCategories = {
@@ -122,25 +129,15 @@ export default function Dashboard() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [config, setConfig] = useState<UserConfig | null>(null)
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([])
   const [showConfigDialog, setShowConfigDialog] = useState(false)
-  const [showExpenseDialog, setShowExpenseDialog] = useState(false)
   const [tempConfig, setTempConfig] = useState<UserConfig | null>(null)
-  const [newExpense, setNewExpense] = useState({
-    category: "",
-    amount: "",
-    description: "",
-  })
   const [showResetDialog, setShowResetDialog] = useState(false)
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
-  const [showEditDialog, setShowEditDialog] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState("")
   const [newCategoryIcon, setNewCategoryIcon] = useState("DollarSign")
   const [newCategoryPercentage, setNewCategoryPercentage] = useState("")
 
   // Estados para manejo de errores y loading
-  const [addingExpense, setAddingExpense] = useState(false)
+  const [addingTransaction, setAddingTransaction] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -159,11 +156,25 @@ export default function Dashboard() {
   const [showCalculatorModal, setShowCalculatorModal] = useState(false)
 
   // Ref para el unsubscribe de Firestore
-  const [unsubscribeExpenses, setUnsubscribeExpenses] = useState<(() => void) | null>(null)
-
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [unsubscribeTransactions, setUnsubscribeTransactions] = useState<(() => void) | null>(null)
 
   const router = useRouter()
+
+  // Estados para transacciones
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([])
+  const [showTransactionDialog, setShowTransactionDialog] = useState(false)
+  const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id">>({
+    type: "expense",
+    category: "",
+    amount: "",
+    description: "",
+    date: new Date().toISOString(),
+    isRecurring: false,
+    recurringDay: 1,
+  })
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  const [showEditDialog, setShowEditDialog] = useState(false)
 
   // Optimización: Memoizar cálculos costosos
   const netSalary = useMemo(() => {
@@ -190,22 +201,34 @@ export default function Dashboard() {
       }, 0)
   }, [config, netSalary, isAhorroCategory])
 
-  const remainingBudget = useMemo(() => {
-    if (!config) return 0
-
+  // Calcular ingresos y gastos totales del mes actual
+  const currentMonthTransactions = useMemo(() => {
     const currentMonth = new Date().getMonth()
     const currentYear = new Date().getFullYear()
 
-    const totalSpentThisMonth = expenses
-      .filter((expense) => {
-        const expenseDate = new Date(expense.date)
-        return expenseDate.getMonth() === currentMonth && expenseDate.getFullYear() === currentYear
-      })
-      .reduce((total, expense) => total + expense.amount, 0)
+    return transactions.filter((transaction) => {
+      const transactionDate = new Date(transaction.date)
+      return transactionDate.getMonth() === currentMonth && transactionDate.getFullYear() === currentYear
+    })
+  }, [transactions])
 
-    // Restar tanto los gastos como el ahorro del sueldo neto
-    return netSalary - totalSpentThisMonth - totalSavings
-  }, [netSalary, expenses, totalSavings])
+  const totalIncome = useMemo(() => {
+    return currentMonthTransactions
+      .filter((transaction) => transaction.type === "income")
+      .reduce((total, transaction) => total + transaction.amount, 0)
+  }, [currentMonthTransactions])
+
+  const totalExpenses = useMemo(() => {
+    return currentMonthTransactions
+      .filter((transaction) => transaction.type === "expense")
+      .reduce((total, transaction) => total + transaction.amount, 0)
+  }, [currentMonthTransactions])
+
+  const remainingBudget = useMemo(() => {
+    if (!config) return 0
+    // Sueldo neto + ingresos extra - gastos - ahorro
+    return netSalary + totalIncome - totalExpenses - totalSavings
+  }, [netSalary, totalIncome, totalExpenses, totalSavings])
 
   // Filtrar categorías que NO son de ahorro para gastos
   const getSpendableCategories = useCallback(() => {
@@ -213,60 +236,18 @@ export default function Dashboard() {
     return getOrderedCategories().filter(([key]) => !isAhorroCategory(key))
   }, [config, isAhorroCategory])
 
-  // Optimización: Filtrado mejorado con useMemo
-  const filteredAndSearchedExpenses = useMemo(() => {
-    let filtered = [...expenses]
-
-    // Filtrar por categoría
-    if (filterCategory !== "all") {
-      filtered = filtered.filter((expense) => expense.category === filterCategory)
-    }
-
-    // Filtrar por fecha específica
-    if (filterDate && isValidDate(filterDate)) {
-      const targetDate = parseDate(filterDate)
-      if (targetDate) {
-        filtered = filtered.filter((expense) => {
-          const expenseDate = new Date(expense.date)
-          return (
-            expenseDate.getDate() === targetDate.getDate() &&
-            expenseDate.getMonth() === targetDate.getMonth() &&
-            expenseDate.getFullYear() === targetDate.getFullYear()
-          )
-        })
-      }
-    }
-
-    // Filtrar por término de búsqueda
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase().trim()
-      filtered = filtered.filter(
-        (expense) =>
-          expense.description.toLowerCase().includes(term) ||
-          config?.categories[expense.category]?.name.toLowerCase().includes(term),
-      )
-    }
-
-    // Ordenar por fecha (más recientes primero)
-    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  }, [expenses, filterCategory, filterDate, searchTerm, config])
-
-  useEffect(() => {
-    setFilteredExpenses(filteredAndSearchedExpenses)
-  }, [filteredAndSearchedExpenses])
-
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user)
         await loadUserConfig(user.uid)
-        const unsubscribe = loadExpenses(user.uid)
-        setUnsubscribeExpenses(() => unsubscribe)
+        const unsubscribe = loadTransactions(user.uid)
+        setUnsubscribeTransactions(() => unsubscribe)
       } else {
-        // Limpiar listener de gastos al cerrar sesión
-        if (unsubscribeExpenses) {
-          unsubscribeExpenses()
-          setUnsubscribeExpenses(null)
+        // Limpiar listener de transacciones al cerrar sesión
+        if (unsubscribeTransactions) {
+          unsubscribeTransactions()
+          setUnsubscribeTransactions(null)
         }
         router.push("/")
       }
@@ -276,8 +257,8 @@ export default function Dashboard() {
     return () => {
       unsubscribe()
       // Limpiar listener al desmontar componente
-      if (unsubscribeExpenses) {
-        unsubscribeExpenses()
+      if (unsubscribeTransactions) {
+        unsubscribeTransactions()
       }
     }
   }, [router])
@@ -322,29 +303,6 @@ export default function Dashboard() {
     }
   }, [])
 
-  const loadExpenses = useCallback((userId: string) => {
-    const q = query(collection(db, "expenses"), where("userId", "==", userId))
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const expensesData: Expense[] = []
-        querySnapshot.forEach((doc) => {
-          expensesData.push({ id: doc.id, ...doc.data() } as Expense)
-        })
-        setExpenses(expensesData)
-      },
-      (error) => {
-        console.error("Error in expenses listener:", error)
-        // Solo mostrar error si el usuario aún está autenticado
-        if (auth.currentUser) {
-          setError("Error al cargar los gastos")
-        }
-      },
-    )
-
-    return unsubscribe
-  }, [])
-
   const saveConfig = useCallback(async () => {
     if (!user || !tempConfig) return
 
@@ -367,76 +325,16 @@ export default function Dashboard() {
     }
   }, [user, tempConfig])
 
-  const addExpense = useCallback(async () => {
-    if (!user || !newExpense.category || !newExpense.amount) {
-      setError("Por favor completa todos los campos obligatorios")
-      return
-    }
-
-    // Verificar que no sea una categoría de ahorro
-    if (isAhorroCategory(newExpense.category)) {
-      setError("No puedes agregar gastos a la categoría de ahorro. El ahorro se calcula automáticamente.")
-      return
-    }
-
-    const amount = parseFormattedValue(newExpense.amount)
-    if (isNaN(amount) || amount <= 0) {
-      setError("El monto debe ser un número mayor a 0")
-      return
-    }
-
-    setAddingExpense(true)
-    setError(null)
-
-    try {
-      const expenseData = {
-        userId: user.uid,
-        category: newExpense.category,
-        amount: amount,
-        description: newExpense.description || "Sin descripción",
-        date: new Date().toISOString(),
-      }
-
-      await addDoc(collection(db, "expenses"), expenseData)
-
-      setNewExpense({ category: "", amount: "", description: "" })
-      setShowExpenseDialog(false)
-      setSuccess("Gasto agregado exitosamente")
-    } catch (error: any) {
-      console.error("Error adding expense:", error)
-
-      if (error.code === "permission-denied") {
-        setError("Error de permisos. Verifica que las reglas de Firestore estén configuradas correctamente.")
-      } else if (error.code === "unauthenticated") {
-        setError("Usuario no autenticado. Por favor inicia sesión nuevamente.")
-      } else {
-        setError(`Error al agregar el gasto: ${error.message}`)
-      }
-    } finally {
-      setAddingExpense(false)
-    }
-  }, [user, newExpense, isAhorroCategory])
-
-  const deleteExpense = useCallback(async (expenseId: string) => {
-    try {
-      await deleteDoc(doc(db, "expenses", expenseId))
-      setSuccess("Gasto eliminado exitosamente")
-    } catch (error: any) {
-      console.error("Error deleting expense:", error)
-      setError("Error al eliminar el gasto")
-    }
-  }, [])
-
   const handleLogout = useCallback(async () => {
     try {
       // Limpiar listener antes de cerrar sesión
-      if (unsubscribeExpenses) {
-        unsubscribeExpenses()
-        setUnsubscribeExpenses(null)
+      if (unsubscribeTransactions) {
+        unsubscribeTransactions()
+        setUnsubscribeTransactions(null)
       }
 
       // Limpiar estado local
-      setExpenses([])
+      setTransactions([])
       setConfig(null)
       setUser(null)
 
@@ -446,53 +344,13 @@ export default function Dashboard() {
       console.error("Error during logout:", error)
       setError("Error al cerrar sesión")
     }
-  }, [unsubscribeExpenses, router])
-
-  const calculateCategoryData = useCallback(
-    (categoryKey: string) => {
-      if (!config) return { available: 0, spent: 0, percentage: 0, budget: 0 }
-
-      const categoryBudget = (netSalary * config.categories[categoryKey].percentage) / 100
-
-      // Si es categoría de ahorro, simplemente devolver el monto fijo
-      if (isAhorroCategory(categoryKey)) {
-        return {
-          available: categoryBudget, // El monto fijo a ahorrar
-          spent: 0, // No hay concepto de "gasto" en ahorro
-          percentage: 0, // No hay concepto de porcentaje usado
-          budget: categoryBudget,
-        }
-      }
-
-      // Para categorías normales, calcular gastos del mes actual
-      const currentMonth = new Date().getMonth()
-      const currentYear = new Date().getFullYear()
-      const spent = expenses
-        .filter((expense) => {
-          const expenseDate = new Date(expense.date)
-          return (
-            expense.category === categoryKey &&
-            expenseDate.getMonth() === currentMonth &&
-            expenseDate.getFullYear() === currentYear
-          )
-        })
-        .reduce((total, expense) => total + expense.amount, 0)
-
-      return {
-        available: categoryBudget - spent,
-        spent,
-        percentage: categoryBudget > 0 ? (spent / categoryBudget) * 100 : 0,
-        budget: categoryBudget,
-      }
-    },
-    [config, netSalary, expenses, isAhorroCategory],
-  )
+  }, [unsubscribeTransactions, router])
 
   const resetAllData = useCallback(async () => {
     if (!user) return
 
     try {
-      const q = query(collection(db, "expenses"), where("userId", "==", user.uid))
+      const q = query(collection(db, "transactions"), where("userId", "==", user.uid))
       const querySnapshot = await getDocs(q)
 
       const deletePromises = querySnapshot.docs.map((doc) => deleteDoc(doc.ref))
@@ -505,37 +363,6 @@ export default function Dashboard() {
       setError("Error al restablecer los datos")
     }
   }, [user])
-
-  const updateExpense = useCallback(async () => {
-    if (!editingExpense || !editingExpense.category || !editingExpense.amount) {
-      setError("Por favor completa todos los campos obligatorios")
-      return
-    }
-
-    // Verificar que no sea una categoría de ahorro
-    if (isAhorroCategory(editingExpense.category)) {
-      setError("No puedes editar gastos en la categoría de ahorro.")
-      return
-    }
-
-    try {
-      const expenseRef = doc(db, "expenses", editingExpense.id)
-      await setDoc(expenseRef, {
-        userId: user.uid,
-        category: editingExpense.category,
-        amount: editingExpense.amount,
-        description: editingExpense.description,
-        date: editingExpense.date,
-      })
-
-      setEditingExpense(null)
-      setShowEditDialog(false)
-      setSuccess("Gasto actualizado exitosamente")
-    } catch (error) {
-      console.error("Error updating expense:", error)
-      setError("Error al actualizar el gasto")
-    }
-  }, [editingExpense, user, isAhorroCategory])
 
   const addNewCategory = useCallback(() => {
     if (!tempConfig || !newCategoryName.trim()) {
@@ -625,10 +452,14 @@ export default function Dashboard() {
   )
 
   const moveCategory = useCallback(
-    (fromIndex: number, toIndex: number) => {
+    (fromIndex: number, direction: "up" | "down") => {
       if (!tempConfig?.categoryOrder) return
 
       const newOrder = [...tempConfig.categoryOrder]
+      const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1
+
+      if (toIndex < 0 || toIndex >= newOrder.length) return
+
       const [movedItem] = newOrder.splice(fromIndex, 1)
       newOrder.splice(toIndex, 0, movedItem)
 
@@ -638,6 +469,20 @@ export default function Dashboard() {
       })
     },
     [tempConfig],
+  )
+
+  const moveCategoryUp = useCallback(
+    (index: number) => {
+      moveCategory(index, "up")
+    },
+    [moveCategory],
+  )
+
+  const moveCategoryDown = useCallback(
+    (index: number) => {
+      moveCategory(index, "down")
+    },
+    [moveCategory],
   )
 
   const getOrderedCategories = useCallback(() => {
@@ -716,27 +561,6 @@ export default function Dashboard() {
     setSearchTerm("")
   }, [])
 
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDraggedIndex(index)
-    e.dataTransfer.effectAllowed = "move"
-  }, [])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = "move"
-  }, [])
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent, dropIndex: number) => {
-      e.preventDefault()
-      if (draggedIndex === null || draggedIndex === dropIndex) return
-
-      moveCategory(draggedIndex, dropIndex)
-      setDraggedIndex(null)
-    },
-    [draggedIndex, moveCategory],
-  )
-
   // Componente del menú móvil optimizado
   const MobileMenu = React.memo(() => (
     <div className="flex flex-col space-y-2 p-4">
@@ -795,6 +619,243 @@ export default function Dashboard() {
       </Button>
     </div>
   ))
+
+  // Cargar transacciones desde Firestore
+  const loadTransactions = useCallback((userId: string) => {
+    const q = query(collection(db, "transactions"), where("userId", "==", userId))
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const transactionsData: Transaction[] = []
+        querySnapshot.forEach((doc) => {
+          transactionsData.push({ id: doc.id, ...doc.data() } as Transaction)
+        })
+        setTransactions(transactionsData)
+      },
+      (error) => {
+        console.error("Error in transactions listener:", error)
+        // Solo mostrar error si el usuario aún está autenticado
+        if (auth.currentUser) {
+          setError("Error al cargar las transacciones. Verifica los permisos de Firestore.")
+        }
+      },
+    )
+
+    return unsubscribe
+  }, [])
+
+  // Agregar transacción a Firestore
+  const addTransaction = useCallback(async () => {
+    if (!user || !newTransaction.amount) {
+      setError("Por favor completa todos los campos obligatorios")
+      return
+    }
+
+    if (newTransaction.type === "expense" && !newTransaction.category) {
+      setError("Por favor selecciona una categoría para el gasto")
+      return
+    }
+
+    // Verificar que no sea una categoría de ahorro para gastos
+    if (newTransaction.type === "expense" && isAhorroCategory(newTransaction.category!)) {
+      setError("No puedes agregar gastos a la categoría de ahorro. El ahorro se calcula automáticamente.")
+      return
+    }
+
+    const amount = parseFormattedValue(newTransaction.amount)
+    if (isNaN(amount) || amount <= 0) {
+      setError("El monto debe ser un número mayor a 0")
+      return
+    }
+
+    // Validar día de recurrencia
+    if (newTransaction.isRecurring) {
+      const day = newTransaction.recurringDay || 1
+      if (day < 1 || day > 28) {
+        setError("El día de recurrencia debe estar entre 1 y 28")
+        return
+      }
+    }
+
+    setAddingTransaction(true)
+    setError(null)
+
+    try {
+      const transactionData = {
+        userId: user.uid,
+        type: newTransaction.type,
+        category: newTransaction.category || null,
+        amount: amount,
+        description: newTransaction.description || (newTransaction.type === "income" ? "Ingreso" : "Gasto"),
+        date: new Date().toISOString(),
+        isRecurring: newTransaction.isRecurring || false,
+      }
+
+      if (newTransaction.isRecurring) {
+        transactionData.recurringDay = newTransaction.recurringDay || 1
+      }
+
+      await addDoc(collection(db, "transactions"), transactionData)
+
+      setNewTransaction({
+        type: "expense",
+        category: "",
+        amount: "",
+        description: "",
+        date: new Date().toISOString(),
+        isRecurring: false,
+        recurringDay: 1,
+      })
+      setShowTransactionDialog(false)
+      setSuccess("Transacción agregada exitosamente")
+    } catch (error: any) {
+      console.error("Error adding transaction:", error)
+      if (error.code === "permission-denied") {
+        setError("Error de permisos. Verifica que las reglas de Firestore estén configuradas correctamente.")
+      } else {
+        setError(`Error al agregar la transacción: ${error.message}`)
+      }
+    } finally {
+      setAddingTransaction(false)
+    }
+  }, [user, newTransaction, isAhorroCategory])
+
+  const deleteTransaction = useCallback(async (transactionId: string) => {
+    try {
+      await deleteDoc(doc(db, "transactions", transactionId))
+      setSuccess("Transacción eliminada exitosamente")
+    } catch (error: any) {
+      console.error("Error deleting transaction:", error)
+      setError("Error al eliminar la transacción")
+    }
+  }, [])
+
+  const updateTransaction = useCallback(async () => {
+    if (!editingTransaction || !editingTransaction.amount) {
+      setError("Por favor completa todos los campos obligatorios")
+      return
+    }
+
+    if (editingTransaction.type === "expense" && !editingTransaction.category) {
+      setError("Por favor selecciona una categoría para el gasto")
+      return
+    }
+
+    // Verificar que no sea una categoría de ahorro para gastos
+    if (editingTransaction.type === "expense" && isAhorroCategory(editingTransaction.category!)) {
+      setError("No puedes editar gastos en la categoría de ahorro.")
+      return
+    }
+
+    // Validar día de recurrencia
+    if (editingTransaction.isRecurring) {
+      const day = editingTransaction.recurringDay || 1
+      if (day < 1 || day > 28) {
+        setError("El día de recurrencia debe estar entre 1 y 28")
+        return
+      }
+    }
+
+    try {
+      const transactionRef = doc(db, "transactions", editingTransaction.id)
+      const updateData: any = {
+        userId: user.uid,
+        type: editingTransaction.type,
+        amount: editingTransaction.amount,
+        description: editingTransaction.description,
+        date: editingTransaction.date,
+        isRecurring: editingTransaction.isRecurring,
+      }
+
+      if (editingTransaction.type === "expense") {
+        updateData.category = editingTransaction.category
+      }
+
+      if (editingTransaction.isRecurring) {
+        updateData.recurringDay = editingTransaction.recurringDay || 1
+      }
+
+      await setDoc(transactionRef, updateData)
+
+      setEditingTransaction(null)
+      setShowEditDialog(false)
+      setSuccess("Transacción actualizada exitosamente")
+    } catch (error) {
+      console.error("Error updating transaction:", error)
+      setError("Error al actualizar la transacción")
+    }
+  }, [editingTransaction, user, isAhorroCategory])
+
+  const calculateCategoryData = useCallback(
+    (categoryKey: string) => {
+      if (!config) return { available: 0, spent: 0, percentage: 0, budget: 0 }
+
+      const categoryBudget = (netSalary * config.categories[categoryKey].percentage) / 100
+
+      // Si es categoría de ahorro, simplemente devolver el monto fijo
+      if (isAhorroCategory(categoryKey)) {
+        return {
+          available: categoryBudget, // El monto fijo a ahorrar
+          spent: 0, // No hay concepto de "gasto" en ahorro
+          percentage: 0, // No hay concepto de porcentaje usado
+          budget: categoryBudget,
+        }
+      }
+
+      // Para categorías normales, calcular gastos del mes actual
+      const spent = currentMonthTransactions
+        .filter((transaction) => transaction.type === "expense" && transaction.category === categoryKey)
+        .reduce((total, transaction) => total + transaction.amount, 0)
+
+      return {
+        available: categoryBudget - spent,
+        spent,
+        percentage: categoryBudget > 0 ? (spent / categoryBudget) * 100 : 0,
+        budget: categoryBudget,
+      }
+    },
+    [config, netSalary, currentMonthTransactions, isAhorroCategory],
+  )
+
+  // Actualizar el estado de filteredTransactions cuando cambian las transacciones o los filtros
+  useEffect(() => {
+    let filtered = [...transactions]
+
+    // Filtrar por categoría
+    if (filterCategory !== "all") {
+      filtered = filtered.filter((transaction) => transaction.category === filterCategory)
+    }
+
+    // Filtrar por fecha específica
+    if (filterDate && isValidDate(filterDate)) {
+      const targetDate = parseDate(filterDate)
+      if (targetDate) {
+        filtered = filtered.filter((transaction) => {
+          const transactionDate = new Date(transaction.date)
+          return (
+            transactionDate.getDate() === targetDate.getDate() &&
+            transactionDate.getMonth() === targetDate.getMonth() &&
+            transactionDate.getFullYear() === targetDate.getFullYear()
+          )
+        })
+      }
+    }
+
+    // Filtrar por término de búsqueda
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim()
+      filtered = filtered.filter(
+        (transaction) =>
+          transaction.description.toLowerCase().includes(term) ||
+          (transaction.category && config?.categories[transaction.category]?.name.toLowerCase().includes(term)),
+      )
+    }
+
+    // Ordenar por fecha (más recientes primero)
+    filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+    setFilteredTransactions(filtered)
+  }, [transactions, filterCategory, filterDate, searchTerm, config])
 
   if (loading) {
     return (
@@ -984,15 +1045,15 @@ export default function Dashboard() {
                       categoryKey={key}
                       category={category}
                       index={index}
+                      totalCategories={getOrderedTempCategories().length}
                       availableIcons={availableIcons}
                       iconMap={iconMap}
                       onUpdateName={updateCategoryName}
                       onUpdateIcon={updateCategoryIcon}
                       onUpdatePercentage={handlePercentageChange}
                       onDelete={deleteCategory}
-                      onDragStart={handleDragStart}
-                      onDragOver={handleDragOver}
-                      onDrop={handleDrop}
+                      onMoveUp={moveCategoryUp}
+                      onMoveDown={moveCategoryDown}
                     />
                   ))}
                 </div>
@@ -1047,9 +1108,9 @@ export default function Dashboard() {
       </Dialog>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
-        {/* Resumen financiero mejorado */}
-        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="col-span-1 sm:col-span-2 lg:col-span-2">
+        {/* Resumen financiero simplificado */}
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Sueldo Neto</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -1062,13 +1123,15 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="col-span-1 sm:col-span-2 lg:col-span-2">
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Restante del Mes</CardTitle>
+              <CardTitle className="text-sm font-medium">Disponible</CardTitle>
               <Wallet className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400">
+              <div
+                className={`text-2xl sm:text-3xl font-bold ${remainingBudget >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
                 ${formatCurrency(Math.abs(remainingBudget))}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
@@ -1161,74 +1224,151 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Sección de gastos mejorada */}
+        {/* Sección de transacciones unificada */}
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <h2 className="text-xl sm:text-2xl font-bold">Gastos</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">Transacciones</h2>
 
-            <Dialog open={showExpenseDialog} onOpenChange={setShowExpenseDialog}>
+            <Dialog open={showTransactionDialog} onOpenChange={setShowTransactionDialog}>
               <DialogTrigger asChild>
                 <Button className="w-full sm:w-auto" size="lg">
                   <Plus className="h-4 w-4 mr-2" />
-                  Agregar Gasto
+                  Agregar Transacción
                 </Button>
               </DialogTrigger>
-              <DialogContent className="mx-4 max-w-md">
+              <DialogContent className="w-[95vw] max-w-md mx-auto">
                 <DialogHeader>
-                  <DialogTitle>Nuevo Gasto</DialogTitle>
-                  <DialogDescription>Registra un nuevo gasto en una de tus categorías</DialogDescription>
+                  <DialogTitle>Nueva Transacción</DialogTitle>
+                  <DialogDescription>Registra un ingreso o gasto</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
+                  {/* Tipo de transacción */}
                   <div className="space-y-2">
-                    <Label htmlFor="category">Categoría *</Label>
+                    <Label>Tipo de transacción *</Label>
                     <Select
-                      value={newExpense.category}
-                      onValueChange={(value) => setNewExpense({ ...newExpense, category: value })}
+                      value={newTransaction.type}
+                      onValueChange={(value: "income" | "expense") =>
+                        setNewTransaction({ ...newTransaction, type: value, category: "" })
+                      }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Selecciona una categoría" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {getSpendableCategories().map(([key, category]) => (
-                          <SelectItem key={key} value={key}>
-                            <div className="flex items-center space-x-2">
-                              {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
-                              <span>{category.name}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="income">
+                          <div className="flex items-center space-x-2">
+                            <ArrowRightCircle className="h-4 w-4 text-green-600" />
+                            <span>Ingreso</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="expense">
+                          <div className="flex items-center space-x-2">
+                            <ArrowLeftCircle className="h-4 w-4 text-red-600" />
+                            <span>Gasto</span>
+                          </div>
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Categoría (solo para gastos) */}
+                  {newTransaction.type === "expense" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="category">Categoría *</Label>
+                      <Select
+                        value={newTransaction.category}
+                        onValueChange={(value) => setNewTransaction({ ...newTransaction, category: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecciona una categoría" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getSpendableCategories().map(([key, category]) => (
+                            <SelectItem key={key} value={key}>
+                              <div className="flex items-center space-x-2">
+                                {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
+                                <span>{category.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Monto */}
                   <div className="space-y-2">
                     <Label htmlFor="amount">Monto *</Label>
                     <Input
                       id="amount"
                       type="text"
-                      value={newExpense.amount}
+                      value={newTransaction.amount}
                       onChange={(e) =>
-                        handleAmountChange(e.target.value, (value) => setNewExpense({ ...newExpense, amount: value }))
+                        handleAmountChange(e.target.value, (value) =>
+                          setNewTransaction({ ...newTransaction, amount: value }),
+                        )
                       }
                       placeholder="Ej: 1.500 o 1.500,50"
                     />
                   </div>
+
+                  {/* Descripción */}
                   <div className="space-y-2">
                     <Label htmlFor="description">Descripción</Label>
                     <Input
                       id="description"
-                      value={newExpense.description}
-                      onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
-                      placeholder="Descripción del gasto (opcional)"
+                      value={newTransaction.description}
+                      onChange={(e) => setNewTransaction({ ...newTransaction, description: e.target.value })}
+                      placeholder={
+                        newTransaction.type === "income" ? "Ej: Aguinaldo, regalo, etc." : "Descripción del gasto"
+                      }
                     />
                   </div>
-                  <Button onClick={addExpense} className="w-full" disabled={addingExpense} size="lg">
-                    {addingExpense ? (
+
+                  {/* Transacción recurrente */}
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="recurring"
+                      checked={newTransaction.isRecurring}
+                      onCheckedChange={(checked) => setNewTransaction({ ...newTransaction, isRecurring: checked })}
+                    />
+                    <Label htmlFor="recurring" className="text-sm">
+                      <div className="flex items-center space-x-2">
+                        <Repeat className="h-4 w-4" />
+                        <span>Transacción recurrente mensual</span>
+                      </div>
+                    </Label>
+                  </div>
+
+                  {/* Día de recurrencia (solo si es recurrente) */}
+                  {newTransaction.isRecurring && (
+                    <div className="space-y-2">
+                      <Label htmlFor="recurring-day">Día del mes para repetir (1-28)</Label>
+                      <Input
+                        id="recurring-day"
+                        type="number"
+                        min="1"
+                        max="28"
+                        value={newTransaction.recurringDay || 1}
+                        onChange={(e) => {
+                          const day = Number.parseInt(e.target.value)
+                          if (day >= 1 && day <= 28) {
+                            setNewTransaction({ ...newTransaction, recurringDay: day })
+                          }
+                        }}
+                        placeholder="Ej: 15"
+                      />
+                    </div>
+                  )}
+
+                  <Button onClick={addTransaction} className="w-full" disabled={addingTransaction} size="lg">
+                    {addingTransaction ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Agregando...
                       </>
                     ) : (
-                      "Agregar Gasto"
+                      `Agregar ${newTransaction.type === "income" ? "Ingreso" : "Gasto"}`
                     )}
                   </Button>
                 </div>
@@ -1255,7 +1395,7 @@ export default function Dashboard() {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Buscar gastos..."
+                    placeholder="Buscar transacciones..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10"
@@ -1288,28 +1428,28 @@ export default function Dashboard() {
                 />
               </div>
 
-              {filteredExpenses.length !== expenses.length && (
+              {filteredTransactions.length !== transactions.length && (
                 <p className="text-sm text-muted-foreground">
-                  Mostrando {filteredExpenses.length} de {expenses.length} gastos
+                  Mostrando {filteredTransactions.length} de {transactions.length} transacciones
                 </p>
               )}
             </div>
           </Card>
 
-          {/* Lista de gastos optimizada */}
+          {/* Lista de transacciones unificada */}
           <Card>
             <CardContent className="p-0">
-              {filteredExpenses.length === 0 ? (
+              {filteredTransactions.length === 0 ? (
                 <div className="p-8 text-center text-muted-foreground">
                   <DollarSign className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p className="text-lg font-medium mb-2">
-                    {expenses.length === 0
-                      ? "No hay gastos registrados"
-                      : "No hay gastos que coincidan con los filtros"}
+                    {transactions.length === 0
+                      ? "No hay transacciones registradas"
+                      : "No hay transacciones que coincidan con los filtros"}
                   </p>
                   <p className="text-sm">
-                    {expenses.length === 0
-                      ? "Comienza agregando tu primer gasto usando el botón de arriba"
+                    {transactions.length === 0
+                      ? "Comienza agregando tu primera transacción usando el botón de arriba"
                       : "Prueba cambiando los filtros o términos de búsqueda"}
                   </p>
                   {(filterCategory !== "all" || filterDate || searchTerm) && (
@@ -1320,39 +1460,54 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="divide-y">
-                  {filteredExpenses.map((expense) => (
+                  {filteredTransactions.map((transaction) => (
                     <div
-                      key={expense.id}
+                      key={transaction.id}
                       className="p-4 flex items-center justify-between hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center space-x-3 sm:space-x-4 flex-1 min-w-0">
                         <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
-                          {React.createElement(
-                            iconMap[config.categories[expense.category]?.icon as keyof typeof iconMap] || DollarSign,
-                            { className: "h-5 w-5" },
+                          {transaction.type === "income" ? (
+                            <ArrowRightCircle className="h-5 w-5 text-green-600" />
+                          ) : (
+                            React.createElement(
+                              iconMap[config.categories[transaction.category!]?.icon as keyof typeof iconMap] ||
+                                DollarSign,
+                              { className: "h-5 w-5" },
+                            )
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{expense.description}</p>
+                          <div className="flex items-center space-x-2">
+                            <p className="font-medium truncate">{transaction.description}</p>
+                            {transaction.isRecurring && <Repeat className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+                          </div>
                           <p className="text-sm text-muted-foreground">
-                            {config.categories[expense.category]?.name} •{" "}
-                            {new Date(expense.date).toLocaleDateString("es-AR")}
+                            {transaction.type === "income" ? "Ingreso" : config.categories[transaction.category!]?.name}{" "}
+                            • {new Date(transaction.date).toLocaleDateString("es-AR")}
+                            {transaction.isRecurring && ` • Día ${transaction.recurringDay || 1}`}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 flex-shrink-0">
-                        <span className="font-semibold text-sm sm:text-base">${formatCurrency(expense.amount)}</span>
+                        <span
+                          className={`font-semibold text-sm sm:text-base ${
+                            transaction.type === "income" ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          {transaction.type === "income" ? "+" : "-"}${formatCurrency(transaction.amount)}
+                        </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            setEditingExpense(expense)
+                            setEditingTransaction(transaction)
                             setShowEditDialog(true)
                           }}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => deleteExpense(expense.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => deleteTransaction(transaction.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -1370,13 +1525,13 @@ export default function Dashboard() {
             <DialogHeader>
               <DialogTitle>Restablecer Datos</DialogTitle>
               <DialogDescription>
-                Esto eliminará todos tus gastos registrados. Esta acción no se puede deshacer.
+                Esto eliminará todas tus transacciones registradas. Esta acción no se puede deshacer.
               </DialogDescription>
             </DialogHeader>
             <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mb-4">
               <p className="text-sm text-destructive">
-                <strong>¡Atención!</strong> Se eliminarán todos los gastos pero se mantendrá tu configuración de sueldo
-                y categorías.
+                <strong>¡Atención!</strong> Se eliminarán todas las transacciones pero se mantendrá tu configuración de
+                sueldo y categorías.
               </p>
             </div>
             <div className="flex gap-2">
@@ -1390,62 +1545,142 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
 
+        {/* Modal de edición de transacciones */}
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="mx-4 max-w-md">
+          <DialogContent className="w-[95vw] max-w-md mx-auto">
             <DialogHeader>
-              <DialogTitle>Editar Gasto</DialogTitle>
-              <DialogDescription>Modifica los datos del gasto seleccionado</DialogDescription>
+              <DialogTitle>Editar Transacción</DialogTitle>
+              <DialogDescription>Modifica los datos de la transacción seleccionada</DialogDescription>
             </DialogHeader>
-            {editingExpense && (
+            {editingTransaction && (
               <div className="space-y-4">
+                {/* Tipo de transacción */}
                 <div className="space-y-2">
-                  <Label htmlFor="edit-category">Categoría</Label>
+                  <Label>Tipo de transacción</Label>
                   <Select
-                    value={editingExpense.category}
-                    onValueChange={(value) => setEditingExpense({ ...editingExpense, category: value })}
+                    value={editingTransaction.type}
+                    onValueChange={(value: "income" | "expense") =>
+                      setEditingTransaction({
+                        ...editingTransaction,
+                        type: value,
+                        category: value === "income" ? undefined : editingTransaction.category,
+                      })
+                    }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecciona una categoría" />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {getSpendableCategories().map(([key, category]) => (
-                        <SelectItem key={key} value={key}>
-                          <div className="flex items-center space-x-2">
-                            {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
-                            <span>{category.name}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="income">
+                        <div className="flex items-center space-x-2">
+                          <ArrowRightCircle className="h-4 w-4 text-green-600" />
+                          <span>Ingreso</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="expense">
+                        <div className="flex items-center space-x-2">
+                          <ArrowLeftCircle className="h-4 w-4 text-red-600" />
+                          <span>Gasto</span>
+                        </div>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Categoría (solo para gastos) */}
+                {editingTransaction.type === "expense" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-category">Categoría</Label>
+                    <Select
+                      value={editingTransaction.category || ""}
+                      onValueChange={(value) => setEditingTransaction({ ...editingTransaction, category: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona una categoría" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getSpendableCategories().map(([key, category]) => (
+                          <SelectItem key={key} value={key}>
+                            <div className="flex items-center space-x-2">
+                              {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
+                              <span>{category.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Monto */}
                 <div className="space-y-2">
                   <Label htmlFor="edit-amount">Monto</Label>
                   <Input
                     id="edit-amount"
                     type="text"
-                    value={formatForInput(editingExpense.amount)}
+                    value={formatForInput(editingTransaction.amount)}
                     onChange={(e) => {
                       const formatted = formatInputValue(e.target.value)
-                      setEditingExpense({
-                        ...editingExpense,
+                      setEditingTransaction({
+                        ...editingTransaction,
                         amount: parseFormattedValue(formatted),
                       })
                     }}
                     placeholder="Ej: 1.500 o 1.500,50"
                   />
                 </div>
+
+                {/* Descripción */}
                 <div className="space-y-2">
                   <Label htmlFor="edit-description">Descripción</Label>
                   <Input
                     id="edit-description"
-                    value={editingExpense.description}
-                    onChange={(e) => setEditingExpense({ ...editingExpense, description: e.target.value })}
-                    placeholder="Descripción del gasto"
+                    value={editingTransaction.description}
+                    onChange={(e) => setEditingTransaction({ ...editingTransaction, description: e.target.value })}
+                    placeholder="Descripción de la transacción"
                   />
                 </div>
-                <Button onClick={updateExpense} className="w-full" size="lg">
-                  Actualizar Gasto
+
+                {/* Recurrente */}
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-recurring"
+                    checked={editingTransaction.isRecurring || false}
+                    onCheckedChange={(checked) =>
+                      setEditingTransaction({ ...editingTransaction, isRecurring: checked })
+                    }
+                  />
+                  <Label htmlFor="edit-recurring" className="text-sm">
+                    <div className="flex items-center space-x-2">
+                      <Repeat className="h-4 w-4" />
+                      <span>Transacción recurrente mensual</span>
+                    </div>
+                  </Label>
+                </div>
+
+                {/* Día de recurrencia (solo si es recurrente) */}
+                {editingTransaction.isRecurring && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-recurring-day">Día del mes para repetir (1-28)</Label>
+                    <Input
+                      id="edit-recurring-day"
+                      type="number"
+                      min="1"
+                      max="28"
+                      value={editingTransaction.recurringDay || 1}
+                      onChange={(e) => {
+                        const day = Number.parseInt(e.target.value)
+                        if (day >= 1 && day <= 28) {
+                          setEditingTransaction({ ...editingTransaction, recurringDay: day })
+                        }
+                      }}
+                      placeholder="Ej: 15"
+                    />
+                  </div>
+                )}
+
+                <Button onClick={updateTransaction} className="w-full" size="lg">
+                  Actualizar Transacción
                 </Button>
               </div>
             )}
