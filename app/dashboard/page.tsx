@@ -140,19 +140,16 @@ const availableIcons = [
 ];
 
 const iconMap = availableIcons.reduce((acc, item) => {
-  acc[item.name] = item.icon;
+  acc[item.name] = item.icon as React.ComponentType<{ className?: string }>;
   return acc;
-}, {} as Record<string, any>);
+}, {} as Record<string, React.ComponentType<{ className?: string }>>);
 
 export default function Dashboard() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<import("firebase/auth").User | null>(null);
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<UserConfig | null>(null);
   const [showConfigDialog, setShowConfigDialog] = useState(false);
-
-  // CORRECCIÓN: Usar el nuevo tipo para el estado temporal del formulario
   const [tempConfig, setTempConfig] = useState<TempUserConfig | null>(null);
-
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryIcon, setNewCategoryIcon] = useState("DollarSign");
@@ -190,17 +187,24 @@ export default function Dashboard() {
     Transaction[]
   >([]);
   const [showTransactionDialog, setShowTransactionDialog] = useState(false);
-  const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id">>(
-    {
-      type: "expense",
-      category: "",
-      amount: "",
-      description: "",
-      date: new Date().toISOString(),
-      isRecurring: false,
-      recurringDay: 1,
-    }
-  );
+  const [newTransaction, setNewTransaction] = useState<{
+    id?: string;
+    type: "income" | "expense";
+    category?: string;
+    amount: string;
+    description: string;
+    date: string;
+    isRecurring?: boolean;
+    recurringDay?: number;
+  }>({
+    type: "expense",
+    category: "",
+    amount: "",
+    description: "",
+    date: new Date().toISOString(),
+    isRecurring: false,
+    recurringDay: 1,
+  });
   const [editingTransaction, setEditingTransaction] =
     useState<Transaction | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -275,15 +279,21 @@ export default function Dashboard() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setUser(user);
-        await loadUserConfig(user.uid);
+        try {
+          await loadUserConfig(user.uid);
+        } catch (e) {
+          // Si el usuario pierde permisos, no mostrar error
+          setConfig(null);
+        }
         const unsubscribe = loadTransactions(user.uid);
         setUnsubscribeTransactions(() => unsubscribe);
       } else {
-        // Limpiar listener de transacciones al cerrar sesión
         if (unsubscribeTransactions) {
           unsubscribeTransactions();
           setUnsubscribeTransactions(null);
         }
+        setConfig(null); // Limpiar config para evitar flashes de error
+        setError(null); // Limpiar error
         router.push("/");
       }
       setLoading(false);
@@ -334,7 +344,9 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error("Error loading config:", error);
-      setError("Error al cargar la configuración");
+      setTimeout(() => {
+        if (auth.currentUser) setError("Error al cargar la configuración");
+      }, 700);
     }
   }, []);
 
@@ -740,7 +752,7 @@ export default function Dashboard() {
       return;
     }
 
-    const amount = parseFormattedValue(newTransaction.amount as string);
+    const amount = parseFormattedValue(newTransaction.amount);
     if (isNaN(amount) || amount <= 0) {
       setError("El monto debe ser un número mayor a 0");
       return;
@@ -760,7 +772,7 @@ export default function Dashboard() {
 
     try {
       const transactionData: any = {
-        userId: user.uid,
+        userId: user?.uid ?? "",
         type: newTransaction.type,
         category: newTransaction.category || null,
         amount: amount,
@@ -954,13 +966,11 @@ export default function Dashboard() {
     setFilteredTransactions(filtered);
   }, [transactions, filterCategory, filterDate, searchTerm, config]);
 
+  // Loader global para proteger la página mientras se verifica el usuario
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto" />
-          <p className="text-muted-foreground">Cargando tu dashboard...</p>
-        </div>
+        <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
   }
@@ -977,18 +987,17 @@ export default function Dashboard() {
     );
   }
 
+  // Opcional: ocultar errores de permisos si no hay usuario
+  if (!user && !loading) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Mensajes de error y éxito optimizados */}
-      {error && (
-        <div className="fixed top-4 right-4 z-[100] bg-destructive/10 border border-destructive/20 rounded-lg p-4 shadow-lg max-w-md animate-in slide-in-from-right">
-          <div className="flex items-center space-x-2">
-            <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0" />
-            <p className="text-sm text-destructive flex-1">{error}</p>
-            <Button variant="ghost" size="sm" onClick={() => setError(null)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+      {user && !loading && error && (
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+          <p className="text-sm text-destructive">{error}</p>
         </div>
       )}
 
@@ -1310,10 +1319,14 @@ export default function Dashboard() {
             <CardContent>
               <div
                 className={`text-2xl sm:text-3xl font-bold ${
-                  remainingBudget >= 0 ? "text-green-600" : "text-red-600"
+                  remainingBudget >= 0
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-600 dark:text-red-400"
                 }`}
               >
-                ${formatCurrency(Math.abs(remainingBudget))}
+                {remainingBudget >= 0
+                  ? `$${formatCurrency(remainingBudget)}`
+                  : `($${formatCurrency(Math.abs(remainingBudget))})`}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 {remainingBudget >= 0
@@ -1403,7 +1416,7 @@ export default function Dashboard() {
                               ? formatCurrency(data.available)
                               : `(${formatCurrency(Math.abs(data.available))})`}
                           </div>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-muted-foreground mt-1">
                             Disponible de ${formatCurrency(data.budget)}
                           </p>
                           <div className="mt-4">
@@ -1531,7 +1544,7 @@ export default function Dashboard() {
                     <Input
                       id="amount"
                       type="text"
-                      value={newTransaction.amount as string}
+                      value={newTransaction.amount}
                       onChange={(e) =>
                         handleAmountChange(e.target.value, (value) =>
                           setNewTransaction({
@@ -1597,7 +1610,7 @@ export default function Dashboard() {
                         max="28"
                         value={newTransaction.recurringDay || 1}
                         onChange={(e) => {
-                          const day = Number.parseInt(e.target.value);
+                          const day = newTransaction.recurringDay || 1;
                           if (day >= 1 && day <= 28) {
                             setNewTransaction({
                               ...newTransaction,
@@ -1757,7 +1770,7 @@ export default function Dashboard() {
                               <Repeat className="h-4 w-4 text-blue-600 flex-shrink-0" />
                             )}
                           </div>
-                          <p className="text-sm text-muted-foreground">
+                          <p className="text-sm text-muted-foreground sm:block hidden">
                             {transaction.type === "income"
                               ? "Ingreso"
                               : config.categories[transaction.category!]
@@ -1769,14 +1782,19 @@ export default function Dashboard() {
                             {transaction.isRecurring &&
                               ` • Día ${transaction.recurringDay || 1}`}
                           </p>
+                          <p className="text-sm text-muted-foreground sm:hidden block">
+                            {new Date(transaction.date).toLocaleDateString(
+                              "es-AR"
+                            )}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 flex-shrink-0">
                         <span
                           className={`font-semibold text-sm sm:text-base ${
                             transaction.type === "income"
-                              ? "text-green-600"
-                              : "text-red-600"
+                              ? "text-green-600 dark:text-green-400"
+                              : "text-red-600 dark:text-red-400"
                           }`}
                         >
                           {transaction.type === "income" ? "+" : "-"}$
