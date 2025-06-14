@@ -975,7 +975,9 @@ export default function Dashboard() {
     );
   }
 
+  // Mostrar error solo si hay usuario autenticado
   if (!config) {
+    if (!user) return null;
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
