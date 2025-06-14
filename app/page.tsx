@@ -1,14 +1,14 @@
 "use client"
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
+import React, { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup,
 } from "firebase/auth"
 import { auth } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
@@ -21,8 +21,11 @@ import { ThemeToggle } from "@/components/theme-toggle"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
+  const [loginEmail, setLoginEmail] = useState("")
+  const [loginPassword, setLoginPassword] = useState("")
+  const [registerEmail, setRegisterEmail] = useState("")
+  const [registerPassword, setRegisterPassword] = useState("")
+  const [registerPasswordConfirm, setRegisterPasswordConfirm] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [checkingAuth, setCheckingAuth] = useState(true)
@@ -43,62 +46,77 @@ export default function LoginPage() {
     return () => unsubscribe()
   }, [router])
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
+  const handleLogin = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault()
+      setLoading(true)
+      setError("")
 
-    try {
-      await signInWithEmailAndPassword(auth, email, password)
-      router.push("/dashboard")
-    } catch (error: any) {
-      setError("Error al iniciar sesión. Verifica tus credenciales.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError("")
-
-    try {
-      await createUserWithEmailAndPassword(auth, email, password)
-      router.push("/dashboard")
-    } catch (error: any) {
-      setError("Error al crear la cuenta. Intenta con otro email.")
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!resetEmail.trim()) {
-      setError("Por favor ingresa tu email")
-      return
-    }
-
-    setResetLoading(true)
-    setError("")
-
-    try {
-      await sendPasswordResetEmail(auth, resetEmail)
-      setEmailSent(true)
-    } catch (error: any) {
-      console.error("Error sending password reset email:", error)
-      if (error.code === "auth/user-not-found") {
-        setError("No existe una cuenta con este email")
-      } else if (error.code === "auth/invalid-email") {
-        setError("Email inválido")
-      } else {
-        setError("Error al enviar el email de recuperación. Intenta nuevamente.")
+      try {
+        await signInWithEmailAndPassword(auth, loginEmail, loginPassword)
+        router.push("/dashboard")
+      } catch (error: any) {
+        setError("Error al iniciar sesión. Verifica tus credenciales.")
+      } finally {
+        setLoading(false)
       }
-    } finally {
-      setResetLoading(false)
-    }
-  }
+    },
+    [loginEmail, loginPassword, router]
+  )
+
+  const handleRegister = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault()
+      setLoading(true)
+      setError("")
+
+      if (registerPassword !== registerPasswordConfirm) {
+        setError("Las contraseñas no coinciden.")
+        setLoading(false)
+        return
+      }
+
+      try {
+        await createUserWithEmailAndPassword(auth, registerEmail, registerPassword)
+        router.push("/dashboard")
+      } catch (error: any) {
+        setError("Error al crear la cuenta. Intenta con otro email.")
+      } finally {
+        setLoading(false)
+      }
+    },
+    [registerEmail, registerPassword, registerPasswordConfirm, router]
+  )
+
+  const handleForgotPassword = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault()
+      if (!resetEmail.trim()) {
+        setError("Por favor ingresa tu email")
+        return
+      }
+
+      setResetLoading(true)
+      setError("")
+
+      try {
+        await sendPasswordResetEmail(auth, resetEmail)
+        setEmailSent(true)
+      } catch (error: any) {
+        console.error("Error sending password reset email:", error)
+        if (error.code === "auth/user-not-found") {
+          setError("No existe una cuenta con este email")
+        } else if (error.code === "auth/invalid-email") {
+          setError("Email inválido")
+        } else {
+          setError("Error al enviar el email de recuperación. Intenta nuevamente.")
+        }
+      } finally {
+        setResetLoading(false)
+      }
+    },
+    [resetEmail]
+  )
 
   if (checkingAuth) {
     return (
@@ -129,15 +147,15 @@ export default function LoginPage() {
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={email} placeholder="tu@email.com" onChange={(e) => setEmail(e.target.value)} required />
+                  <Input id="email" type="email" value={loginEmail} placeholder="tu@email.com" onChange={(e) => setLoginEmail(e.target.value)} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">Contraseña</Label>
                   <Input
                     id="password"
                     type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
                     required
                   />
                 </div>
@@ -162,37 +180,47 @@ export default function LoginPage() {
             </TabsContent>
 
             <TabsContent value="register">
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="register-email">Email</Label>
-                  <Input
-                    id="register-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    placeholder="tu@email.com"
-                  />
+            <form onSubmit={handleRegister} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="register-email">Email</Label>
+                <Input
+                  id="register-email"
+                  type="email"
+                  value={registerEmail}
+                  onChange={(e) => setRegisterEmail(e.target.value)}
+                  required
+                  placeholder="tu@email.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="register-password">Contraseña</Label>
+                <Input
+                  id="register-password"
+                  type="password"
+                  value={registerPassword}
+                  onChange={(e) => setRegisterPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="register-password-confirm">Confirmar Contraseña</Label>
+                <Input
+                  id="register-password-confirm"
+                  type="password"
+                  value={registerPasswordConfirm}
+                  onChange={(e) => setRegisterPasswordConfirm(e.target.value)}
+                  required
+                />
+              </div>
+              {error && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                  <p className="text-sm text-destructive">{error}</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="register-password">Contraseña</Label>
-                  <Input
-                    id="register-password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                {error && (
-                  <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-                    <p className="text-sm text-destructive">{error}</p>
-                  </div>
-                )}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Crear Cuenta"}
-                </Button>
-              </form>
+              )}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Crear Cuenta"}
+              </Button>
+            </form>
             </TabsContent>
           </Tabs>
         </CardContent>

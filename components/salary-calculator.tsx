@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import React, { useState, useCallback, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -15,31 +15,38 @@ interface InflationData {
   year: number
 }
 
+interface Result {
+  percentage: number
+  increase: number
+}
+
+interface InflationResult {
+  salaryIncrease: number
+  accumulatedInflation: number
+  realIncrease: number
+  coveragePercentage: number
+  shouldBeSalary: number
+}
+
 export function SalaryCalculator() {
-  const [oldSalary, setOldSalary] = useState("")
-  const [newSalary, setNewSalary] = useState("")
-  const [monthsSinceIncrease, setMonthsSinceIncrease] = useState("")
+  const [inputs, setInputs] = useState({
+    oldSalary: "",
+    newSalary: "",
+    monthsSinceIncrease: "",
+  })
+
   const [monthlyInflations, setMonthlyInflations] = useState<Array<{ value: string; month: string; year: number }>>([])
-  const [result, setResult] = useState<{
-    percentage: number
-    increase: number
-  } | null>(null)
-  const [inflationResult, setInflationResult] = useState<{
-    salaryIncrease: number
-    accumulatedInflation: number
-    realIncrease: number
-    coveragePercentage: number
-    shouldBeSalary: number
-  } | null>(null)
+  const [result, setResult] = useState<Result | null>(null)
+  const [inflationResult, setInflationResult] = useState<InflationResult | null>(null)
 
   const [loadingInflation, setLoadingInflation] = useState(false)
   const [autoInflationEnabled, setAutoInflationEnabled] = useState(false)
   const [inflationError, setInflationError] = useState<string | null>(null)
 
-  const calculate = () => {
-    const oldAmount = parseFormattedValue(oldSalary)
-    const newAmount = parseFormattedValue(newSalary)
-    const months = Number.parseInt(monthsSinceIncrease)
+  const calculate = useCallback(() => {
+    const oldAmount = parseFormattedValue(inputs.oldSalary)
+    const newAmount = parseFormattedValue(inputs.newSalary)
+    const months = Number.parseInt(inputs.monthsSinceIncrease)
 
     if (oldAmount <= 0 || newAmount <= 0) {
       return
@@ -54,7 +61,6 @@ export function SalaryCalculator() {
     })
 
     if (months > 0) {
-      // Validar que tengamos inflación para al menos algunos meses
       const validInflations = monthlyInflations
         .slice(0, months)
         .filter((inf) => inf.value.trim() !== "" && !isNaN(Number.parseFloat(inf.value.replace(",", "."))))
@@ -63,7 +69,6 @@ export function SalaryCalculator() {
         return
       }
 
-      // Calcular inflación acumulada solo con los datos disponibles
       let accumulatedInflation = 1
       validInflations.forEach((inf) => {
         const monthlyRate = Number.parseFloat(inf.value.replace(",", ".")) / 100
@@ -71,16 +76,9 @@ export function SalaryCalculator() {
       })
       accumulatedInflation = (accumulatedInflation - 1) * 100
 
-      // Calcular lo que debería ser el sueldo con inflación
       const shouldBeSalary = oldAmount * (1 + accumulatedInflation / 100)
-
-      // Calcular aumento real del sueldo
       const salaryIncrease = ((newAmount - oldAmount) / oldAmount) * 100
-
-      // Calcular aumento real (descontando inflación)
       const realIncrease = salaryIncrease - accumulatedInflation
-
-      // Calcular qué porcentaje de la inflación cubre el aumento
       const coveragePercentage = (salaryIncrease / accumulatedInflation) * 100
 
       setInflationResult({
@@ -93,78 +91,83 @@ export function SalaryCalculator() {
     } else {
       setInflationResult(null)
     }
-  }
+  }, [inputs, monthlyInflations])
 
-  const handleAmountChange = (value: string, setter: (value: string) => void) => {
-    const formatted = formatInputValue(value)
-    setter(formatted)
-  }
+  const handleAmountChange = useCallback(
+    (field: keyof typeof inputs, value: string) => {
+      const formatted = formatInputValue(value)
+      setInputs((prev) => ({ ...prev, [field]: formatted }))
+    },
+    []
+  )
 
-  const handleMonthsChange = (value: string) => {
-    const months = Number.parseInt(value) || 0
-    setMonthsSinceIncrease(value)
+  const handleMonthsChange = useCallback(
+    (value: string) => {
+      const months = Number.parseInt(value) || 0
+      setInputs((prev) => ({ ...prev, monthsSinceIncrease: value }))
 
-    // Ajustar array de inflaciones según cantidad de meses
-    if (months > 0) {
-      // Crear un mapa de los datos existentes por mes/año
-      const existingDataMap = new Map<string, string>()
-      monthlyInflations.forEach((inf) => {
-        const key = `${inf.month}-${inf.year}`
-        existingDataMap.set(key, inf.value)
-      })
-
-      // Calcular los meses correspondientes considerando el retraso en publicación
-      const now = new Date()
-      const newInflations = Array(months)
-        .fill(null)
-        .map((_, index) => {
-          // Ir hacia atrás: index 0 = hace 'months+1' meses, index 'months-1' = hace 2 meses
-          // +1 porque los datos del mes anterior se publican a mediados del mes siguiente
-          const monthsBack = months - index + 1
-          const targetDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
-
-          const monthNames = [
-            "Enero",
-            "Febrero",
-            "Marzo",
-            "Abril",
-            "Mayo",
-            "Junio",
-            "Julio",
-            "Agosto",
-            "Septiembre",
-            "Octubre",
-            "Noviembre",
-            "Diciembre",
-          ]
-
-          const month = monthNames[targetDate.getMonth()]
-          const year = targetDate.getFullYear()
-          const key = `${month}-${year}`
-
-          return {
-            value: existingDataMap.get(key) || "", // Mantener datos existentes
-            month,
-            year,
-          }
+      if (months > 0) {
+        const existingDataMap = new Map<string, string>()
+        monthlyInflations.forEach((inf) => {
+          const key = `${inf.month}-${inf.year}`
+          existingDataMap.set(key, inf.value)
         })
-      setMonthlyInflations(newInflations)
-    }
 
-    // Limpiar errores y estado automático
-    setInflationError(null)
-    setAutoInflationEnabled(false)
-  }
+        const now = new Date()
+        const newInflations = Array(months)
+          .fill(null)
+          .map((_, index) => {
+            const monthsBack = months - index + 1
+            const targetDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)
 
-  const updateInflation = (index: number, value: string) => {
-    const newInflations = [...monthlyInflations]
-    newInflations[index] = { ...newInflations[index], value }
-    setMonthlyInflations(newInflations)
-    setAutoInflationEnabled(false) // Desactivar modo automático si edita manualmente
-  }
+            const monthNames = [
+              "Enero",
+              "Febrero",
+              "Marzo",
+              "Abril",
+              "Mayo",
+              "Junio",
+              "Julio",
+              "Agosto",
+              "Septiembre",
+              "Octubre",
+              "Noviembre",
+              "Diciembre",
+            ]
 
-  const loadAutomaticInflation = async () => {
-    const months = Number.parseInt(monthsSinceIncrease)
+            const month = monthNames[targetDate.getMonth()]
+            const year = targetDate.getFullYear()
+            const key = `${month}-${year}`
+
+            return {
+              value: existingDataMap.get(key) || "",
+              month,
+              year,
+            }
+          })
+        setMonthlyInflations(newInflations)
+      }
+
+      setInflationError(null)
+      setAutoInflationEnabled(false)
+    },
+    [monthlyInflations]
+  )
+
+  const updateInflation = useCallback(
+    (index: number, value: string) => {
+      setMonthlyInflations((prev) => {
+        const newInflations = [...prev]
+        newInflations[index] = { ...newInflations[index], value }
+        return newInflations
+      })
+      setAutoInflationEnabled(false)
+    },
+    []
+  )
+
+  const loadAutomaticInflation = useCallback(async () => {
+    const months = Number.parseInt(inputs.monthsSinceIncrease)
     if (months <= 0) return
 
     setLoadingInflation(true)
@@ -175,12 +178,12 @@ export function SalaryCalculator() {
       const data = await response.json()
 
       if (data.success && data.data) {
-        // Cargar todos los datos disponibles
-        const newInflations = monthlyInflations.map((inf, index) => ({
-          ...inf,
-          value: data.data[index]?.rate?.toString() || "",
-        }))
-        setMonthlyInflations(newInflations)
+        setMonthlyInflations((prev) =>
+          prev.map((inf, index) => ({
+            ...inf,
+            value: data.data[index]?.rate?.toString() || "",
+          }))
+        )
         setAutoInflationEnabled(true)
       } else {
         setInflationError(data.error || "No se pudieron obtener datos de inflación")
@@ -191,9 +194,9 @@ export function SalaryCalculator() {
     } finally {
       setLoadingInflation(false)
     }
-  }
+  }, [inputs.monthsSinceIncrease])
 
-  const getResultBadge = () => {
+  const getResultBadge = useCallback(() => {
     if (!inflationResult) return null
 
     if (inflationResult.coveragePercentage >= 100) {
@@ -224,7 +227,7 @@ export function SalaryCalculator() {
         </div>
       )
     }
-  }
+  }, [inflationResult])
 
   return (
     <Card>
@@ -242,8 +245,8 @@ export function SalaryCalculator() {
               <Input
                 id="old-salary"
                 type="text"
-                value={oldSalary}
-                onChange={(e) => handleAmountChange(e.target.value, setOldSalary)}
+                value={inputs.oldSalary}
+                onChange={(e) => handleAmountChange("oldSalary", e.target.value)}
                 placeholder="Ej: 100.000"
               />
             </div>
@@ -252,8 +255,8 @@ export function SalaryCalculator() {
               <Input
                 id="new-salary"
                 type="text"
-                value={newSalary}
-                onChange={(e) => handleAmountChange(e.target.value, setNewSalary)}
+                value={inputs.newSalary}
+                onChange={(e) => handleAmountChange("newSalary", e.target.value)}
                 placeholder="Ej: 120.000"
               />
             </div>
@@ -264,7 +267,7 @@ export function SalaryCalculator() {
             <Input
               id="months"
               type="number"
-              value={monthsSinceIncrease}
+              value={inputs.monthsSinceIncrease}
               onChange={(e) => handleMonthsChange(e.target.value)}
               placeholder="Ej: 3"
               min="1"
@@ -272,7 +275,7 @@ export function SalaryCalculator() {
             />
           </div>
 
-          {Number.parseInt(monthsSinceIncrease) > 0 && (
+          {Number.parseInt(inputs.monthsSinceIncrease) > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Inflación mensual (%)</Label>
@@ -307,7 +310,7 @@ export function SalaryCalculator() {
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {monthlyInflations.slice(0, Number.parseInt(monthsSinceIncrease)).map((inflation, index) => (
+                {monthlyInflations.slice(0, Number.parseInt(inputs.monthsSinceIncrease)).map((inflation, index) => (
                   <div key={index} className="space-y-1">
                     <Label className="text-xs text-muted-foreground">
                       {inflation.month} {inflation.year}
@@ -379,8 +382,8 @@ export function SalaryCalculator() {
                   ${formatCurrency(inflationResult.shouldBeSalary)}
                 </p>
                 <p className="text-xs text-purple-600 dark:text-purple-400 text-center mt-1">
-                  Diferencia: {inflationResult.shouldBeSalary > parseFormattedValue(newSalary) ? "+" : ""}$
-                  {formatCurrency(Math.abs(inflationResult.shouldBeSalary - parseFormattedValue(newSalary)))}
+                  Diferencia: {inflationResult.shouldBeSalary > parseFormattedValue(inputs.newSalary) ? "+" : ""}$
+                  {formatCurrency(Math.abs(inflationResult.shouldBeSalary - parseFormattedValue(inputs.newSalary)))}
                 </p>
               </div>
             </div>
