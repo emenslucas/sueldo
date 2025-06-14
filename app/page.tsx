@@ -4,7 +4,12 @@ import type React from "react"
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth"
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+} from "firebase/auth"
 import { auth } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Loader2 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -20,6 +26,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [checkingAuth, setCheckingAuth] = useState(true)
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState("")
+  const [resetLoading, setResetLoading] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -63,6 +73,33 @@ export default function LoginPage() {
     }
   }
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetEmail.trim()) {
+      setError("Por favor ingresa tu email")
+      return
+    }
+
+    setResetLoading(true)
+    setError("")
+
+    try {
+      await sendPasswordResetEmail(auth, resetEmail)
+      setEmailSent(true)
+    } catch (error: any) {
+      console.error("Error sending password reset email:", error)
+      if (error.code === "auth/user-not-found") {
+        setError("No existe una cuenta con este email")
+      } else if (error.code === "auth/invalid-email") {
+        setError("Email inválido")
+      } else {
+        setError("Error al enviar el email de recuperación. Intenta nuevamente.")
+      }
+    } finally {
+      setResetLoading(false)
+    }
+  }
+
   if (checkingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -92,7 +129,7 @@ export default function LoginPage() {
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <Input id="email" type="email" value={email} placeholder="tu@email.com" onChange={(e) => setEmail(e.target.value)} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">Contraseña</Label>
@@ -112,6 +149,15 @@ export default function LoginPage() {
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Iniciar Sesión"}
                 </Button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => setForgotPasswordOpen(true)}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
               </form>
             </TabsContent>
 
@@ -125,6 +171,7 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    placeholder="tu@email.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -150,6 +197,57 @@ export default function LoginPage() {
           </Tabs>
         </CardContent>
       </Card>
+      <Dialog open={forgotPasswordOpen} onOpenChange={setForgotPasswordOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Recuperar Contraseña</DialogTitle>
+            <DialogDescription>
+              Ingresa tu email y se te enviará un enlace para restablecer tu contraseña.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reset-email">Email</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="tu@email.com"
+                required
+              />
+            </div>
+
+            {error && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                <p className="text-sm text-destructive">{error}</p>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setForgotPasswordOpen(false)
+                  setResetEmail("")
+                  setError("")
+                  setEmailSent(false)
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={resetLoading}
+                className={`transition-all duration-300 ${emailSent ? "bg-green-500 hover:bg-green-700" : ""}`}
+              >
+                {resetLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : emailSent ? "Enviado" : "Enviar Email"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

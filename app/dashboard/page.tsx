@@ -1,109 +1,131 @@
-"use client"
+"use client";
 
-import { DialogTrigger } from "@/components/ui/dialog"
-import React from "react"
-import { useEffect, useState, useCallback, useMemo } from "react"
-import { useRouter } from "next/navigation"
-import { onAuthStateChanged, signOut } from "firebase/auth"
+import { DraggableCategory } from "@/components/draggable-category";
+import { SalaryCalculator } from "@/components/salary-calculator";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  doc,
-  getDoc,
-  setDoc,
-  collection,
-  addDoc,
-  query,
-  where,
-  onSnapshot,
-  deleteDoc,
-  getDocs,
-} from "firebase/firestore"
-import { auth, db } from "@/lib/firebase"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
+import { auth, db } from "@/lib/firebase";
 import {
   formatCurrency,
-  formatInputValue,
-  parseFormattedValue,
-  formatForInput,
   formatDateInput,
+  formatForInput,
+  formatInputValue,
   isValidDate,
   parseDate,
-} from "@/lib/formatters"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
-import { ThemeToggle } from "@/components/theme-toggle"
+  parseFormattedValue,
+} from "@/lib/formatters";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  setDoc,
+  where,
+} from "firebase/firestore";
+import {
+  AlertCircle,
+  ArrowLeftCircle,
+  ArrowRightCircle,
+  Calculator,
+  Car,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  DollarSign,
+  Edit,
+  Filter,
+  Gift,
+  Home,
   Loader2,
   LogOut,
-  Plus,
-  Settings,
-  Trash2,
-  DollarSign,
-  PiggyBank,
-  User,
-  Edit,
-  Home,
-  Car,
-  Utensils,
-  ShoppingBag,
-  Plane,
-  X,
-  AlertCircle,
-  CheckCircle,
-  Filter,
-  Wallet,
-  Gift,
-  ChevronUp,
-  ChevronDown,
   Menu,
-  TrendingUp,
-  Calculator,
-  Search,
+  PiggyBank,
+  Plane,
+  Plus,
   Repeat,
-  ArrowRightCircle,
-  ArrowLeftCircle,
-} from "lucide-react"
-import { SalaryCalculator } from "@/components/salary-calculator"
-import { DraggableCategory } from "@/components/draggable-category"
-import { Switch } from "@/components/ui/switch"
+  Search,
+  Settings,
+  ShoppingBag,
+  Trash2,
+  TrendingUp,
+  User,
+  Utensils,
+  Wallet,
+  X,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 interface Category {
-  name: string
-  percentage: number
-  icon: string
+  name: string;
+  percentage: number;
+  icon: string;
 }
 
 interface Transaction {
-  id: string
-  type: "income" | "expense"
-  category?: string
-  amount: number
-  description: string
-  date: string
-  isRecurring?: boolean
-  recurringDay?: number
+  id: string;
+  type: "income" | "expense";
+  category?: string;
+  amount: number;
+  description: string;
+  date: string;
+  isRecurring?: boolean;
+  recurringDay?: number;
 }
 
+// Interfaz para la configuración guardada (con números)
 interface UserConfig {
-  salary: number
-  monotributo: number
+  salary: number;
+  monotributo: number;
   categories: {
-    [key: string]: Category
-  }
-  categoryOrder?: string[]
+    [key: string]: Category;
+  };
+  categoryOrder?: string[];
+}
+
+// CORRECCIÓN: Interfaz para el estado del formulario de configuración (con strings)
+interface TempUserConfig extends Omit<UserConfig, "salary" | "monotributo"> {
+  salary: string;
+  monotributo: string;
 }
 
 const defaultCategories = {
   ahorro: { name: "Ahorro", percentage: 40, icon: "PiggyBank" },
   servicios: { name: "Servicios", percentage: 35, icon: "Home" },
-  gastos_personales: { name: "Gastos Personales", percentage: 25, icon: "User" },
-}
+  gastos_personales: {
+    name: "Gastos Personales",
+    percentage: 25,
+    icon: "User",
+  },
+};
 
-const defaultCategoryOrder = ["ahorro", "servicios", "gastos_personales"]
+const defaultCategoryOrder = ["ahorro", "servicios", "gastos_personales"];
 
 const availableIcons = [
   { name: "PiggyBank", icon: PiggyBank, label: "Ahorro" },
@@ -115,274 +137,307 @@ const availableIcons = [
   { name: "ShoppingBag", icon: ShoppingBag, label: "Compras" },
   { name: "Plane", icon: Plane, label: "Viajes" },
   { name: "DollarSign", icon: DollarSign, label: "Servicios" },
-]
+];
 
-const iconMap = availableIcons.reduce(
-  (acc, item) => {
-    acc[item.name] = item.icon
-    return acc
-  },
-  {} as Record<string, any>,
-)
+const iconMap = availableIcons.reduce((acc, item) => {
+  acc[item.name] = item.icon;
+  return acc;
+}, {} as Record<string, any>);
 
 export default function Dashboard() {
-  const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [config, setConfig] = useState<UserConfig | null>(null)
-  const [showConfigDialog, setShowConfigDialog] = useState(false)
-  const [tempConfig, setTempConfig] = useState<UserConfig | null>(null)
-  const [showResetDialog, setShowResetDialog] = useState(false)
-  const [newCategoryName, setNewCategoryName] = useState("")
-  const [newCategoryIcon, setNewCategoryIcon] = useState("DollarSign")
-  const [newCategoryPercentage, setNewCategoryPercentage] = useState("")
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<UserConfig | null>(null);
+  const [showConfigDialog, setShowConfigDialog] = useState(false);
+
+  // CORRECCIÓN: Usar el nuevo tipo para el estado temporal del formulario
+  const [tempConfig, setTempConfig] = useState<TempUserConfig | null>(null);
+
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryIcon, setNewCategoryIcon] = useState("DollarSign");
+  const [newCategoryPercentage, setNewCategoryPercentage] = useState("");
 
   // Estados para manejo de errores y loading
-  const [addingTransaction, setAddingTransaction] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [addingTransaction, setAddingTransaction] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Estados para filtros mejorados
-  const [filterCategory, setFilterCategory] = useState<string>("all")
-  const [filterDate, setFilterDate] = useState<string>("")
-  const [searchTerm, setSearchTerm] = useState<string>("")
+  const [filterCategory, setFilterCategory] = useState<string>("all");
+  const [filterDate, setFilterDate] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState<string>("");
 
   // Estado para mostrar/ocultar categorías
-  const [showCategories, setShowCategories] = useState(true)
+  const [showCategories, setShowCategories] = useState(true);
 
   // Estado para el menú móvil
-  const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   // Estados para modales
-  const [showCalculatorModal, setShowCalculatorModal] = useState(false)
+  const [showCalculatorModal, setShowCalculatorModal] = useState(false);
 
   // Ref para el unsubscribe de Firestore
-  const [unsubscribeTransactions, setUnsubscribeTransactions] = useState<(() => void) | null>(null)
+  const [unsubscribeTransactions, setUnsubscribeTransactions] = useState<
+    (() => void) | null
+  >(null);
 
-  const router = useRouter()
+  const router = useRouter();
 
   // Estados para transacciones
-  const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([])
-  const [showTransactionDialog, setShowTransactionDialog] = useState(false)
-  const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id">>({
-    type: "expense",
-    category: "",
-    amount: "",
-    description: "",
-    date: new Date().toISOString(),
-    isRecurring: false,
-    recurringDay: 1,
-  })
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
-  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [filteredTransactions, setFilteredTransactions] = useState<
+    Transaction[]
+  >([]);
+  const [showTransactionDialog, setShowTransactionDialog] = useState(false);
+  const [newTransaction, setNewTransaction] = useState<Omit<Transaction, "id">>(
+    {
+      type: "expense",
+      category: "",
+      amount: "",
+      description: "",
+      date: new Date().toISOString(),
+      isRecurring: false,
+      recurringDay: 1,
+    }
+  );
+  const [editingTransaction, setEditingTransaction] =
+    useState<Transaction | null>(null);
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   // Optimización: Memoizar cálculos costosos
   const netSalary = useMemo(() => {
-    if (!config) return 0
-    return config?.salary - (config?.monotributo || 0)
-  }, [config?.salary, config])
+    if (!config) return 0;
+    return config?.salary - (config?.monotributo || 0);
+  }, [config?.salary, config]);
 
   // Función para verificar si una categoría es de ahorro
   const isAhorroCategory = useCallback(
     (categoryKey: string) => {
-      return categoryKey === "ahorro" || config?.categories[categoryKey]?.icon === "PiggyBank"
+      return (
+        categoryKey === "ahorro" ||
+        config?.categories[categoryKey]?.icon === "PiggyBank"
+      );
     },
-    [config],
-  )
+    [config]
+  );
 
   // Calcular el monto total destinado al ahorro
   const totalSavings = useMemo(() => {
-    if (!config) return 0
+    if (!config) return 0;
 
     return Object.entries(config.categories)
       .filter(([key]) => isAhorroCategory(key))
       .reduce((total, [_, category]) => {
-        return total + (netSalary * category.percentage) / 100
-      }, 0)
-  }, [config, netSalary, isAhorroCategory])
+        return total + (netSalary * category.percentage) / 100;
+      }, 0);
+  }, [config, netSalary, isAhorroCategory]);
 
   // Calcular ingresos y gastos totales del mes actual
   const currentMonthTransactions = useMemo(() => {
-    const currentMonth = new Date().getMonth()
-    const currentYear = new Date().getFullYear()
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
 
     return transactions.filter((transaction) => {
-      const transactionDate = new Date(transaction.date)
-      return transactionDate.getMonth() === currentMonth && transactionDate.getFullYear() === currentYear
-    })
-  }, [transactions])
+      const transactionDate = new Date(transaction.date);
+      return (
+        transactionDate.getMonth() === currentMonth &&
+        transactionDate.getFullYear() === currentYear
+      );
+    });
+  }, [transactions]);
 
   const totalIncome = useMemo(() => {
     return currentMonthTransactions
       .filter((transaction) => transaction.type === "income")
-      .reduce((total, transaction) => total + transaction.amount, 0)
-  }, [currentMonthTransactions])
+      .reduce((total, transaction) => total + transaction.amount, 0);
+  }, [currentMonthTransactions]);
 
   const totalExpenses = useMemo(() => {
     return currentMonthTransactions
       .filter((transaction) => transaction.type === "expense")
-      .reduce((total, transaction) => total + transaction.amount, 0)
-  }, [currentMonthTransactions])
+      .reduce((total, transaction) => total + transaction.amount, 0);
+  }, [currentMonthTransactions]);
 
   const remainingBudget = useMemo(() => {
-    if (!config) return 0
+    if (!config) return 0;
     // Sueldo neto + ingresos extra - gastos - ahorro
-    return netSalary + totalIncome - totalExpenses - totalSavings
-  }, [netSalary, totalIncome, totalExpenses, totalSavings])
+    return netSalary + totalIncome - totalExpenses - totalSavings;
+  }, [netSalary, totalIncome, totalExpenses, totalSavings]);
 
   // Filtrar categorías que NO son de ahorro para gastos
   const getSpendableCategories = useCallback(() => {
-    if (!config) return []
-    return getOrderedCategories().filter(([key]) => !isAhorroCategory(key))
-  }, [config, isAhorroCategory])
+    if (!config) return [];
+    return getOrderedCategories().filter(([key]) => !isAhorroCategory(key));
+  }, [config, isAhorroCategory]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setUser(user)
-        await loadUserConfig(user.uid)
-        const unsubscribe = loadTransactions(user.uid)
-        setUnsubscribeTransactions(() => unsubscribe)
+        setUser(user);
+        await loadUserConfig(user.uid);
+        const unsubscribe = loadTransactions(user.uid);
+        setUnsubscribeTransactions(() => unsubscribe);
       } else {
         // Limpiar listener de transacciones al cerrar sesión
         if (unsubscribeTransactions) {
-          unsubscribeTransactions()
-          setUnsubscribeTransactions(null)
+          unsubscribeTransactions();
+          setUnsubscribeTransactions(null);
         }
-        router.push("/")
+        router.push("/");
       }
-      setLoading(false)
-    })
+      setLoading(false);
+    });
 
     return () => {
-      unsubscribe()
+      unsubscribe();
       // Limpiar listener al desmontar componente
       if (unsubscribeTransactions) {
-        unsubscribeTransactions()
+        unsubscribeTransactions();
       }
-    }
-  }, [router])
+    };
+  }, [router]);
 
   // Limpiar mensajes después de 5 segundos
   useEffect(() => {
     if (error || success) {
       const timer = setTimeout(() => {
-        setError(null)
-        setSuccess(null)
-      }, 5000)
-      return () => clearTimeout(timer)
+        setError(null);
+        setSuccess(null);
+      }, 5000);
+      return () => clearTimeout(timer);
     }
-  }, [error, success])
+  }, [error, success]);
 
   // Optimización: useCallback para funciones que se pasan como props
   const loadUserConfig = useCallback(async (userId: string) => {
     try {
-      const docRef = doc(db, "users", userId)
-      const docSnap = await getDoc(docRef)
+      const docRef = doc(db, "users", userId);
+      const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        const userData = docSnap.data() as UserConfig
+        const userData = docSnap.data() as UserConfig;
         // Asegurar que existe categoryOrder
         if (!userData.categoryOrder) {
-          userData.categoryOrder = Object.keys(userData.categories)
+          userData.categoryOrder = Object.keys(userData.categories);
         }
-        setConfig(userData)
+        setConfig(userData);
       } else {
         const defaultConfig: UserConfig = {
           salary: 0,
           monotributo: 0,
           categories: defaultCategories,
           categoryOrder: defaultCategoryOrder,
-        }
-        setConfig(defaultConfig)
-        await setDoc(docRef, defaultConfig)
+        };
+        setConfig(defaultConfig);
+        await setDoc(docRef, defaultConfig);
       }
     } catch (error) {
-      console.error("Error loading config:", error)
-      setError("Error al cargar la configuración")
+      console.error("Error loading config:", error);
+      setError("Error al cargar la configuración");
     }
-  }, [])
+  }, []);
 
+  // CORRECCIÓN: La función ahora convierte los strings a números ANTES de guardar
   const saveConfig = useCallback(async () => {
-    if (!user || !tempConfig) return
+    if (!user || !tempConfig) return;
 
-    const totalPercentage = Object.values(tempConfig.categories).reduce((sum, category) => sum + category.percentage, 0)
+    const totalPercentage = Object.values(tempConfig.categories).reduce(
+      (sum, category) => sum + category.percentage,
+      0
+    );
 
     if (Math.abs(totalPercentage - 100) > 0.01) {
-      setError(`La suma de porcentajes debe ser 100%. Actualmente es ${totalPercentage.toFixed(1)}%`)
-      return
+      setError(
+        `La suma de porcentajes debe ser 100%. Actualmente es ${totalPercentage.toFixed(
+          1
+        )}%`
+      );
+      return;
     }
 
+    // Convertir los strings del formulario a números para guardar
+    const configToSave: UserConfig = {
+      ...tempConfig,
+      salary: parseFormattedValue(tempConfig.salary),
+      monotributo: parseFormattedValue(tempConfig.monotributo),
+    };
+
     try {
-      const docRef = doc(db, "users", user.uid)
-      await setDoc(docRef, tempConfig)
-      setConfig(tempConfig)
-      setShowConfigDialog(false)
-      setSuccess("Configuración guardada exitosamente")
+      const docRef = doc(db, "users", user.uid);
+      await setDoc(docRef, configToSave);
+      setConfig(configToSave); // Actualizar el estado principal con los números
+      setShowConfigDialog(false);
+      setSuccess("Configuración guardada exitosamente");
     } catch (error) {
-      console.error("Error saving config:", error)
-      setError("Error al guardar la configuración")
+      console.error("Error saving config:", error);
+      setError("Error al guardar la configuración");
     }
-  }, [user, tempConfig])
+  }, [user, tempConfig]);
 
   const handleLogout = useCallback(async () => {
     try {
       // Limpiar listener antes de cerrar sesión
       if (unsubscribeTransactions) {
-        unsubscribeTransactions()
-        setUnsubscribeTransactions(null)
+        unsubscribeTransactions();
+        setUnsubscribeTransactions(null);
       }
 
       // Limpiar estado local
-      setTransactions([])
-      setConfig(null)
-      setUser(null)
+      setTransactions([]);
+      setConfig(null);
+      setUser(null);
 
-      await signOut(auth)
-      router.push("/")
+      await signOut(auth);
+      router.push("/");
     } catch (error) {
-      console.error("Error during logout:", error)
-      setError("Error al cerrar sesión")
+      console.error("Error during logout:", error);
+      setError("Error al cerrar sesión");
     }
-  }, [unsubscribeTransactions, router])
+  }, [unsubscribeTransactions, router]);
 
   const resetAllData = useCallback(async () => {
-    if (!user) return
+    if (!user) return;
 
     try {
-      const q = query(collection(db, "transactions"), where("userId", "==", user.uid))
-      const querySnapshot = await getDocs(q)
+      const q = query(
+        collection(db, "transactions"),
+        where("userId", "==", user.uid)
+      );
+      const querySnapshot = await getDocs(q);
 
-      const deletePromises = querySnapshot.docs.map((doc) => deleteDoc(doc.ref))
-      await Promise.all(deletePromises)
+      const deletePromises = querySnapshot.docs.map((doc) =>
+        deleteDoc(doc.ref)
+      );
+      await Promise.all(deletePromises);
 
-      setShowResetDialog(false)
-      setSuccess("Todos los datos han sido restablecidos")
+      setShowResetDialog(false);
+      setSuccess("Todos los datos han sido restablecidos");
     } catch (error) {
-      console.error("Error resetting data:", error)
-      setError("Error al restablecer los datos")
+      console.error("Error resetting data:", error);
+      setError("Error al restablecer los datos");
     }
-  }, [user])
+  }, [user]);
 
   const addNewCategory = useCallback(() => {
     if (!tempConfig || !newCategoryName.trim()) {
-      setError("Por favor ingresa un nombre para la categoría")
-      return
+      setError("Por favor ingresa un nombre para la categoría");
+      return;
     }
 
-    const categoryKey = newCategoryName.toLowerCase().replace(/\s+/g, "_")
+    const categoryKey = newCategoryName.toLowerCase().replace(/\s+/g, "_");
 
     if (tempConfig.categories[categoryKey]) {
-      setError("Ya existe una categoría con ese nombre")
-      return
+      setError("Ya existe una categoría con ese nombre");
+      return;
     }
 
-    const percentage = parseFormattedValue(newCategoryPercentage)
+    const percentage = parseFormattedValue(newCategoryPercentage);
     const newCategory: Category = {
       name: newCategoryName.trim(),
       percentage: percentage,
       icon: newCategoryIcon,
-    }
+    };
 
     setTempConfig({
       ...tempConfig,
@@ -391,33 +446,35 @@ export default function Dashboard() {
         [categoryKey]: newCategory,
       },
       categoryOrder: [...(tempConfig.categoryOrder || []), categoryKey],
-    })
+    });
 
-    setNewCategoryName("")
-    setNewCategoryPercentage("")
-    setNewCategoryIcon("DollarSign")
-    setSuccess("Categoría agregada (recuerda guardar la configuración)")
-  }, [tempConfig, newCategoryName, newCategoryPercentage, newCategoryIcon])
+    setNewCategoryName("");
+    setNewCategoryPercentage("");
+    setNewCategoryIcon("DollarSign");
+    setSuccess("Categoría agregada (recuerda guardar la configuración)");
+  }, [tempConfig, newCategoryName, newCategoryPercentage, newCategoryIcon]);
 
   const deleteCategory = useCallback(
     (categoryKey: string) => {
-      if (!tempConfig) return
+      if (!tempConfig) return;
 
-      const { [categoryKey]: deleted, ...remainingCategories } = tempConfig.categories
-      const newOrder = tempConfig.categoryOrder?.filter((key) => key !== categoryKey) || []
+      const { [categoryKey]: deleted, ...remainingCategories } =
+        tempConfig.categories;
+      const newOrder =
+        tempConfig.categoryOrder?.filter((key) => key !== categoryKey) || [];
 
       setTempConfig({
         ...tempConfig,
         categories: remainingCategories,
         categoryOrder: newOrder,
-      })
+      });
     },
-    [tempConfig],
-  )
+    [tempConfig]
+  );
 
   const updateCategoryName = useCallback(
     (categoryKey: string, newName: string) => {
-      if (!tempConfig) return
+      if (!tempConfig) return;
 
       setTempConfig({
         ...tempConfig,
@@ -428,14 +485,14 @@ export default function Dashboard() {
             name: newName,
           },
         },
-      })
+      });
     },
-    [tempConfig],
-  )
+    [tempConfig]
+  );
 
   const updateCategoryIcon = useCallback(
     (categoryKey: string, newIcon: string) => {
-      if (!tempConfig) return
+      if (!tempConfig) return;
 
       setTempConfig({
         ...tempConfig,
@@ -446,100 +503,104 @@ export default function Dashboard() {
             icon: newIcon,
           },
         },
-      })
+      });
     },
-    [tempConfig],
-  )
+    [tempConfig]
+  );
 
   const moveCategory = useCallback(
     (fromIndex: number, direction: "up" | "down") => {
-      if (!tempConfig?.categoryOrder) return
+      if (!tempConfig?.categoryOrder) return;
 
-      const newOrder = [...tempConfig.categoryOrder]
-      const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1
+      const newOrder = [...tempConfig.categoryOrder];
+      const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
 
-      if (toIndex < 0 || toIndex >= newOrder.length) return
+      if (toIndex < 0 || toIndex >= newOrder.length) return;
 
-      const [movedItem] = newOrder.splice(fromIndex, 1)
-      newOrder.splice(toIndex, 0, movedItem)
+      const [movedItem] = newOrder.splice(fromIndex, 1);
+      newOrder.splice(toIndex, 0, movedItem);
 
       setTempConfig({
         ...tempConfig,
         categoryOrder: newOrder,
-      })
+      });
     },
-    [tempConfig],
-  )
+    [tempConfig]
+  );
 
   const moveCategoryUp = useCallback(
     (index: number) => {
-      moveCategory(index, "up")
+      moveCategory(index, "up");
     },
-    [moveCategory],
-  )
+    [moveCategory]
+  );
 
   const moveCategoryDown = useCallback(
     (index: number) => {
-      moveCategory(index, "down")
+      moveCategory(index, "down");
     },
-    [moveCategory],
-  )
+    [moveCategory]
+  );
 
   const getOrderedCategories = useCallback(() => {
-    if (!config?.categoryOrder) return Object.entries(config?.categories || {})
+    if (!config?.categoryOrder) return Object.entries(config?.categories || {});
 
-    const orderedEntries: [string, Category][] = []
+    const orderedEntries: [string, Category][] = [];
 
     // Agregar categorías en el orden especificado
     config.categoryOrder.forEach((key) => {
       if (config.categories[key]) {
-        orderedEntries.push([key, config.categories[key]])
+        orderedEntries.push([key, config.categories[key]]);
       }
-    })
+    });
 
     // Agregar categorías que no están en el orden (por si acaso)
     Object.entries(config.categories).forEach(([key, category]) => {
       if (!config.categoryOrder?.includes(key)) {
-        orderedEntries.push([key, category])
+        orderedEntries.push([key, category]);
       }
-    })
+    });
 
-    return orderedEntries
-  }, [config])
+    return orderedEntries;
+  }, [config]);
 
   const getOrderedTempCategories = useCallback(() => {
-    if (!tempConfig?.categoryOrder) return Object.entries(tempConfig?.categories || {})
+    if (!tempConfig?.categoryOrder)
+      return Object.entries(tempConfig?.categories || {});
 
-    const orderedEntries: [string, Category][] = []
+    const orderedEntries: [string, Category][] = [];
 
     // Agregar categorías en el orden especificado
     tempConfig.categoryOrder.forEach((key) => {
       if (tempConfig.categories[key]) {
-        orderedEntries.push([key, tempConfig.categories[key]])
+        orderedEntries.push([key, tempConfig.categories[key]]);
       }
-    })
+    });
 
     // Agregar categorías que no están en el orden (por si acaso)
     Object.entries(tempConfig.categories).forEach(([key, category]) => {
       if (!tempConfig.categoryOrder?.includes(key)) {
-        orderedEntries.push([key, category])
+        orderedEntries.push([key, category]);
       }
-    })
+    });
 
-    return orderedEntries
-  }, [tempConfig])
+    return orderedEntries;
+  }, [tempConfig]);
 
-  const handleAmountChange = useCallback((value: string, setter: (value: string) => void) => {
-    const formatted = formatInputValue(value)
-    setter(formatted)
-  }, [])
+  const handleAmountChange = useCallback(
+    (value: string, setter: (value: string) => void) => {
+      const formatted = formatInputValue(value);
+      setter(formatted);
+    },
+    []
+  );
 
   const handlePercentageChange = useCallback(
     (categoryKey: string, value: string) => {
-      if (!tempConfig) return
+      if (!tempConfig) return;
 
-      const formatted = formatInputValue(value)
-      const numericValue = parseFormattedValue(formatted)
+      const formatted = formatInputValue(value);
+      const numericValue = parseFormattedValue(formatted);
 
       setTempConfig({
         ...tempConfig,
@@ -550,16 +611,16 @@ export default function Dashboard() {
             percentage: numericValue,
           },
         },
-      })
+      });
     },
-    [tempConfig],
-  )
+    [tempConfig]
+  );
 
   const clearFilters = useCallback(() => {
-    setFilterCategory("all")
-    setFilterDate("")
-    setSearchTerm("")
-  }, [])
+    setFilterCategory("all");
+    setFilterDate("");
+    setSearchTerm("");
+  }, []);
 
   // Componente del menú móvil optimizado
   const MobileMenu = React.memo(() => (
@@ -568,8 +629,8 @@ export default function Dashboard() {
         variant="outline"
         size="sm"
         onClick={() => {
-          setShowCalculatorModal(true)
-          setShowMobileMenu(false)
+          setShowCalculatorModal(true);
+          setShowMobileMenu(false);
         }}
         className="justify-start"
       >
@@ -580,8 +641,8 @@ export default function Dashboard() {
         variant="outline"
         size="sm"
         onClick={() => {
-          setShowResetDialog(true)
-          setShowMobileMenu(false)
+          setShowResetDialog(true);
+          setShowMobileMenu(false);
         }}
         className="justify-start"
       >
@@ -592,9 +653,16 @@ export default function Dashboard() {
         variant="outline"
         size="sm"
         onClick={() => {
-          setTempConfig(config)
-          setShowConfigDialog(true)
-          setShowMobileMenu(false)
+          // CORRECCIÓN: Al abrir el diálogo, convertir los números a strings para el formulario
+          if (config) {
+            setTempConfig({
+              ...config,
+              salary: formatForInput(config.salary),
+              monotributo: formatForInput(config.monotributo),
+            });
+          }
+          setShowConfigDialog(true);
+          setShowMobileMenu(false);
         }}
         className="justify-start"
       >
@@ -609,8 +677,8 @@ export default function Dashboard() {
         variant="outline"
         size="sm"
         onClick={() => {
-          handleLogout()
-          setShowMobileMenu(false)
+          handleLogout();
+          setShowMobileMenu(false);
         }}
         className="justify-start"
       >
@@ -618,84 +686,96 @@ export default function Dashboard() {
         Salir
       </Button>
     </div>
-  ))
+  ));
 
   // Cargar transacciones desde Firestore
   const loadTransactions = useCallback((userId: string) => {
-    const q = query(collection(db, "transactions"), where("userId", "==", userId))
+    const q = query(
+      collection(db, "transactions"),
+      where("userId", "==", userId)
+    );
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
-        const transactionsData: Transaction[] = []
+        const transactionsData: Transaction[] = [];
         querySnapshot.forEach((doc) => {
-          transactionsData.push({ id: doc.id, ...doc.data() } as Transaction)
-        })
-        setTransactions(transactionsData)
+          transactionsData.push({ id: doc.id, ...doc.data() } as Transaction);
+        });
+        setTransactions(transactionsData);
       },
       (error) => {
-        console.error("Error in transactions listener:", error)
+        console.error("Error in transactions listener:", error);
         // Solo mostrar error si el usuario aún está autenticado
         if (auth.currentUser) {
-          setError("Error al cargar las transacciones. Verifica los permisos de Firestore.")
+          setError(
+            "Error al cargar las transacciones. Verifica los permisos de Firestore."
+          );
         }
-      },
-    )
+      }
+    );
 
-    return unsubscribe
-  }, [])
+    return unsubscribe;
+  }, []);
 
   // Agregar transacción a Firestore
   const addTransaction = useCallback(async () => {
     if (!user || !newTransaction.amount) {
-      setError("Por favor completa todos los campos obligatorios")
-      return
+      setError("Por favor completa todos los campos obligatorios");
+      return;
     }
 
     if (newTransaction.type === "expense" && !newTransaction.category) {
-      setError("Por favor selecciona una categoría para el gasto")
-      return
+      setError("Por favor selecciona una categoría para el gasto");
+      return;
     }
 
     // Verificar que no sea una categoría de ahorro para gastos
-    if (newTransaction.type === "expense" && isAhorroCategory(newTransaction.category!)) {
-      setError("No puedes agregar gastos a la categoría de ahorro. El ahorro se calcula automáticamente.")
-      return
+    if (
+      newTransaction.type === "expense" &&
+      isAhorroCategory(newTransaction.category!)
+    ) {
+      setError(
+        "No puedes agregar gastos a la categoría de ahorro. El ahorro se calcula automáticamente."
+      );
+      return;
     }
 
-    const amount = parseFormattedValue(newTransaction.amount)
+    const amount = parseFormattedValue(newTransaction.amount as string);
     if (isNaN(amount) || amount <= 0) {
-      setError("El monto debe ser un número mayor a 0")
-      return
+      setError("El monto debe ser un número mayor a 0");
+      return;
     }
 
     // Validar día de recurrencia
     if (newTransaction.isRecurring) {
-      const day = newTransaction.recurringDay || 1
+      const day = newTransaction.recurringDay || 1;
       if (day < 1 || day > 28) {
-        setError("El día de recurrencia debe estar entre 1 y 28")
-        return
+        setError("El día de recurrencia debe estar entre 1 y 28");
+        return;
       }
     }
 
-    setAddingTransaction(true)
-    setError(null)
+    setAddingTransaction(true);
+    setError(null);
 
     try {
-      const transactionData = {
+      const transactionData: any = {
         userId: user.uid,
         type: newTransaction.type,
         category: newTransaction.category || null,
         amount: amount,
-        description: newTransaction.description || (newTransaction.type === "income" ? "Ingreso" : "Gasto"),
+        description:
+          newTransaction.description ||
+          (newTransaction.type === "income" ? "Ingreso" : "Gasto"),
         date: new Date().toISOString(),
         isRecurring: newTransaction.isRecurring || false,
-      }
+      };
 
       if (newTransaction.isRecurring) {
-        transactionData.recurringDay = newTransaction.recurringDay || 1
+        transactionData.recurringDay = newTransaction.recurringDay || 1;
       }
 
-      await addDoc(collection(db, "transactions"), transactionData)
+      await addDoc(collection(db, "transactions"), transactionData);
 
       setNewTransaction({
         type: "expense",
@@ -705,59 +785,64 @@ export default function Dashboard() {
         date: new Date().toISOString(),
         isRecurring: false,
         recurringDay: 1,
-      })
-      setShowTransactionDialog(false)
-      setSuccess("Transacción agregada exitosamente")
+      });
+      setShowTransactionDialog(false);
+      setSuccess("Transacción agregada exitosamente");
     } catch (error: any) {
-      console.error("Error adding transaction:", error)
+      console.error("Error adding transaction:", error);
       if (error.code === "permission-denied") {
-        setError("Error de permisos. Verifica que las reglas de Firestore estén configuradas correctamente.")
+        setError(
+          "Error de permisos. Verifica que las reglas de Firestore estén configuradas correctamente."
+        );
       } else {
-        setError(`Error al agregar la transacción: ${error.message}`)
+        setError(`Error al agregar la transacción: ${error.message}`);
       }
     } finally {
-      setAddingTransaction(false)
+      setAddingTransaction(false);
     }
-  }, [user, newTransaction, isAhorroCategory])
+  }, [user, newTransaction, isAhorroCategory]);
 
   const deleteTransaction = useCallback(async (transactionId: string) => {
     try {
-      await deleteDoc(doc(db, "transactions", transactionId))
-      setSuccess("Transacción eliminada exitosamente")
+      await deleteDoc(doc(db, "transactions", transactionId));
+      setSuccess("Transacción eliminada exitosamente");
     } catch (error: any) {
-      console.error("Error deleting transaction:", error)
-      setError("Error al eliminar la transacción")
+      console.error("Error deleting transaction:", error);
+      setError("Error al eliminar la transacción");
     }
-  }, [])
+  }, []);
 
   const updateTransaction = useCallback(async () => {
     if (!editingTransaction || !editingTransaction.amount) {
-      setError("Por favor completa todos los campos obligatorios")
-      return
+      setError("Por favor completa todos los campos obligatorios");
+      return;
     }
 
     if (editingTransaction.type === "expense" && !editingTransaction.category) {
-      setError("Por favor selecciona una categoría para el gasto")
-      return
+      setError("Por favor selecciona una categoría para el gasto");
+      return;
     }
 
     // Verificar que no sea una categoría de ahorro para gastos
-    if (editingTransaction.type === "expense" && isAhorroCategory(editingTransaction.category!)) {
-      setError("No puedes editar gastos en la categoría de ahorro.")
-      return
+    if (
+      editingTransaction.type === "expense" &&
+      isAhorroCategory(editingTransaction.category!)
+    ) {
+      setError("No puedes editar gastos en la categoría de ahorro.");
+      return;
     }
 
     // Validar día de recurrencia
     if (editingTransaction.isRecurring) {
-      const day = editingTransaction.recurringDay || 1
+      const day = editingTransaction.recurringDay || 1;
       if (day < 1 || day > 28) {
-        setError("El día de recurrencia debe estar entre 1 y 28")
-        return
+        setError("El día de recurrencia debe estar entre 1 y 28");
+        return;
       }
     }
 
     try {
-      const transactionRef = doc(db, "transactions", editingTransaction.id)
+      const transactionRef = doc(db, "transactions", editingTransaction.id);
       const updateData: any = {
         userId: user.uid,
         type: editingTransaction.type,
@@ -765,32 +850,33 @@ export default function Dashboard() {
         description: editingTransaction.description,
         date: editingTransaction.date,
         isRecurring: editingTransaction.isRecurring,
-      }
+      };
 
       if (editingTransaction.type === "expense") {
-        updateData.category = editingTransaction.category
+        updateData.category = editingTransaction.category;
       }
 
       if (editingTransaction.isRecurring) {
-        updateData.recurringDay = editingTransaction.recurringDay || 1
+        updateData.recurringDay = editingTransaction.recurringDay || 1;
       }
 
-      await setDoc(transactionRef, updateData)
+      await setDoc(transactionRef, updateData);
 
-      setEditingTransaction(null)
-      setShowEditDialog(false)
-      setSuccess("Transacción actualizada exitosamente")
+      setEditingTransaction(null);
+      setShowEditDialog(false);
+      setSuccess("Transacción actualizada exitosamente");
     } catch (error) {
-      console.error("Error updating transaction:", error)
-      setError("Error al actualizar la transacción")
+      console.error("Error updating transaction:", error);
+      setError("Error al actualizar la transacción");
     }
-  }, [editingTransaction, user, isAhorroCategory])
+  }, [editingTransaction, user, isAhorroCategory]);
 
   const calculateCategoryData = useCallback(
     (categoryKey: string) => {
-      if (!config) return { available: 0, spent: 0, percentage: 0, budget: 0 }
+      if (!config) return { available: 0, spent: 0, percentage: 0, budget: 0 };
 
-      const categoryBudget = (netSalary * config.categories[categoryKey].percentage) / 100
+      const categoryBudget =
+        (netSalary * config.categories[categoryKey].percentage) / 100;
 
       // Si es categoría de ahorro, simplemente devolver el monto fijo
       if (isAhorroCategory(categoryKey)) {
@@ -799,63 +885,74 @@ export default function Dashboard() {
           spent: 0, // No hay concepto de "gasto" en ahorro
           percentage: 0, // No hay concepto de porcentaje usado
           budget: categoryBudget,
-        }
+        };
       }
 
       // Para categorías normales, calcular gastos del mes actual
       const spent = currentMonthTransactions
-        .filter((transaction) => transaction.type === "expense" && transaction.category === categoryKey)
-        .reduce((total, transaction) => total + transaction.amount, 0)
+        .filter(
+          (transaction) =>
+            transaction.type === "expense" &&
+            transaction.category === categoryKey
+        )
+        .reduce((total, transaction) => total + transaction.amount, 0);
 
       return {
         available: categoryBudget - spent,
         spent,
         percentage: categoryBudget > 0 ? (spent / categoryBudget) * 100 : 0,
         budget: categoryBudget,
-      }
+      };
     },
-    [config, netSalary, currentMonthTransactions, isAhorroCategory],
-  )
+    [config, netSalary, currentMonthTransactions, isAhorroCategory]
+  );
 
   // Actualizar el estado de filteredTransactions cuando cambian las transacciones o los filtros
   useEffect(() => {
-    let filtered = [...transactions]
+    let filtered = [...transactions];
 
     // Filtrar por categoría
     if (filterCategory !== "all") {
-      filtered = filtered.filter((transaction) => transaction.category === filterCategory)
+      filtered = filtered.filter(
+        (transaction) => transaction.category === filterCategory
+      );
     }
 
     // Filtrar por fecha específica
     if (filterDate && isValidDate(filterDate)) {
-      const targetDate = parseDate(filterDate)
+      const targetDate = parseDate(filterDate);
       if (targetDate) {
         filtered = filtered.filter((transaction) => {
-          const transactionDate = new Date(transaction.date)
+          const transactionDate = new Date(transaction.date);
           return (
             transactionDate.getDate() === targetDate.getDate() &&
             transactionDate.getMonth() === targetDate.getMonth() &&
             transactionDate.getFullYear() === targetDate.getFullYear()
-          )
-        })
+          );
+        });
       }
     }
 
     // Filtrar por término de búsqueda
     if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase().trim()
+      const term = searchTerm.toLowerCase().trim();
       filtered = filtered.filter(
         (transaction) =>
           transaction.description.toLowerCase().includes(term) ||
-          (transaction.category && config?.categories[transaction.category]?.name.toLowerCase().includes(term)),
-      )
+          (transaction.category &&
+            config?.categories[transaction.category]?.name
+              .toLowerCase()
+              .includes(term))
+      );
     }
 
     // Ordenar por fecha (más recientes primero)
-    filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    filtered.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
 
-    setFilteredTransactions(filtered)
-  }, [transactions, filterCategory, filterDate, searchTerm, config])
+    setFilteredTransactions(filtered);
+  }, [transactions, filterCategory, filterDate, searchTerm, config]);
 
   if (loading) {
     return (
@@ -865,7 +962,7 @@ export default function Dashboard() {
           <p className="text-muted-foreground">Cargando tu dashboard...</p>
         </div>
       </div>
-    )
+    );
   }
 
   if (!config) {
@@ -877,7 +974,7 @@ export default function Dashboard() {
           <Button onClick={() => window.location.reload()}>Reintentar</Button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -912,16 +1009,26 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
-              <h1 className="text-lg sm:text-xl font-semibold">Gestor de Sueldo</h1>
+              <h1 className="text-lg sm:text-xl font-semibold">
+                Gestor de Sueldo
+              </h1>
             </div>
 
             {/* Desktop menu */}
             <div className="hidden md:flex items-center space-x-3">
-              <Button variant="outline" size="sm" onClick={() => setShowCalculatorModal(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCalculatorModal(true)}
+              >
                 <Calculator className="h-4 w-4 mr-2" />
                 Calculadora
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowResetDialog(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowResetDialog(true)}
+              >
                 <Trash2 className="h-4 w-4 mr-2" />
                 Restablecer
               </Button>
@@ -929,8 +1036,15 @@ export default function Dashboard() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setTempConfig(config)
-                  setShowConfigDialog(true)
+                  // CORRECCIÓN: Al abrir el diálogo, convertir los números a strings para el formulario
+                  if (config) {
+                    setTempConfig({
+                      ...config,
+                      salary: formatForInput(config.salary),
+                      monotributo: formatForInput(config.monotributo),
+                    });
+                  }
+                  setShowConfigDialog(true);
                 }}
               >
                 <Settings className="h-4 w-4 mr-2" />
@@ -968,7 +1082,9 @@ export default function Dashboard() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Calculadora de Aumento</DialogTitle>
-            <DialogDescription>Calcula el porcentaje y monto de aumento entre dos sueldos.</DialogDescription>
+            <DialogDescription>
+              Calcula el porcentaje y monto de aumento entre dos sueldos.
+            </DialogDescription>
           </DialogHeader>
           <SalaryCalculator />
         </DialogContent>
@@ -979,7 +1095,9 @@ export default function Dashboard() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Configuración</DialogTitle>
-            <DialogDescription>Ajusta tu sueldo y gestiona tus categorías</DialogDescription>
+            <DialogDescription>
+              Ajusta tu sueldo y gestiona tus categorías
+            </DialogDescription>
           </DialogHeader>
           {tempConfig && (
             <div className="space-y-6">
@@ -989,13 +1107,12 @@ export default function Dashboard() {
                   <Input
                     id="salary"
                     type="text"
-                    value={formatForInput(tempConfig.salary)}
+                    value={tempConfig.salary}
                     onChange={(e) => {
-                      const formatted = formatInputValue(e.target.value)
-                      setTempConfig({
-                        ...tempConfig,
-                        salary: parseFormattedValue(formatted),
-                      })
+                      // CORRECCIÓN: Actualizar el estado de string directamente
+                      handleAmountChange(e.target.value, (value) =>
+                        setTempConfig({ ...tempConfig, salary: value })
+                      );
                     }}
                     placeholder="Ingresa tu sueldo bruto"
                   />
@@ -1005,13 +1122,12 @@ export default function Dashboard() {
                   <Input
                     id="monotributo"
                     type="text"
-                    value={formatForInput(tempConfig.monotributo)}
+                    value={tempConfig.monotributo}
                     onChange={(e) => {
-                      const formatted = formatInputValue(e.target.value)
-                      setTempConfig({
-                        ...tempConfig,
-                        monotributo: parseFormattedValue(formatted),
-                      })
+                      // CORRECCIÓN: Actualizar el estado de string directamente
+                      handleAmountChange(e.target.value, (value) =>
+                        setTempConfig({ ...tempConfig, monotributo: value })
+                      );
                     }}
                     placeholder="Ingresa el monto del monotributo"
                   />
@@ -1024,7 +1140,10 @@ export default function Dashboard() {
                   <div
                     className={`text-sm px-3 py-2 rounded-lg border ${
                       Math.abs(
-                        Object.values(tempConfig.categories).reduce((sum, cat) => sum + cat.percentage, 0) - 100,
+                        Object.values(tempConfig.categories).reduce(
+                          (sum, cat) => sum + cat.percentage,
+                          0
+                        ) - 100
                       ) < 0.01
                         ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-950 dark:border-green-800 dark:text-green-300"
                         : "bg-orange-50 border-orange-200 text-orange-700 dark:bg-orange-950 dark:border-orange-800 dark:text-orange-300"
@@ -1059,10 +1178,14 @@ export default function Dashboard() {
                 </div>
 
                 <Card className="p-4 border-dashed">
-                  <h4 className="text-md font-medium mb-3">Agregar Nueva Categoría</h4>
+                  <h4 className="text-md font-medium mb-3">
+                    Agregar Nueva Categoría
+                  </h4>
                   <div className="space-y-3">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-muted-foreground">Nombre</label>
+                      <label className="text-sm font-medium text-muted-foreground">
+                        Nombre
+                      </label>
                       <Input
                         placeholder="Nombre de categoría"
                         value={newCategoryName}
@@ -1073,23 +1196,37 @@ export default function Dashboard() {
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-sm font-medium text-muted-foreground">Icono</label>
-                        <Select value={newCategoryIcon} onValueChange={setNewCategoryIcon}>
+                        <label className="text-sm font-medium text-muted-foreground">
+                          Icono
+                        </label>
+                        <Select
+                          value={newCategoryIcon}
+                          onValueChange={setNewCategoryIcon}
+                        >
                           <SelectTrigger className="w-full">
                             <SelectValue>
                               <div className="flex items-center space-x-2">
-                                {React.createElement(iconMap[newCategoryIcon], { className: "h-4 w-4" })}
+                                {React.createElement(iconMap[newCategoryIcon], {
+                                  className: "h-4 w-4",
+                                })}
                                 <span className="text-sm">
-                                  {availableIcons.find((icon) => icon.name === newCategoryIcon)?.label || "Icono"}
+                                  {availableIcons.find(
+                                    (icon) => icon.name === newCategoryIcon
+                                  )?.label || "Icono"}
                                 </span>
                               </div>
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {availableIcons.map((iconItem) => (
-                              <SelectItem key={iconItem.name} value={iconItem.name}>
+                              <SelectItem
+                                key={iconItem.name}
+                                value={iconItem.name}
+                              >
                                 <div className="flex items-center space-x-2">
-                                  {React.createElement(iconItem.icon, { className: "h-4 w-4" })}
+                                  {React.createElement(iconItem.icon, {
+                                    className: "h-4 w-4",
+                                  })}
                                   <span>{iconItem.label}</span>
                                 </div>
                               </SelectItem>
@@ -1099,13 +1236,20 @@ export default function Dashboard() {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-sm font-medium text-muted-foreground">Porcentaje</label>
+                        <label className="text-sm font-medium text-muted-foreground">
+                          Porcentaje
+                        </label>
                         <div className="relative">
                           <Input
                             type="text"
                             placeholder="0"
                             value={newCategoryPercentage}
-                            onChange={(e) => handleAmountChange(e.target.value, setNewCategoryPercentage)}
+                            onChange={(e) =>
+                              handleAmountChange(
+                                e.target.value,
+                                setNewCategoryPercentage
+                              )
+                            }
                             className="w-full pr-8"
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
@@ -1115,7 +1259,12 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    <Button onClick={addNewCategory} className="w-full" size="sm" variant="outline">
+                    <Button
+                      onClick={addNewCategory}
+                      className="w-full"
+                      size="sm"
+                      variant="outline"
+                    >
                       <Plus className="h-4 w-4 mr-2" />
                       Agregar Categoría
                     </Button>
@@ -1143,9 +1292,12 @@ export default function Dashboard() {
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold">${formatCurrency(netSalary)}</div>
+              <div className="text-2xl sm:text-3xl font-bold">
+                ${formatCurrency(netSalary)}
+              </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Bruto: ${formatCurrency(config.salary)} - Monotributo: ${formatCurrency(config.monotributo)}
+                Bruto: ${formatCurrency(config.salary)} - Monotributo: $
+                {formatCurrency(config.monotributo)}
               </p>
             </CardContent>
           </Card>
@@ -1157,12 +1309,16 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div
-                className={`text-2xl sm:text-3xl font-bold ${remainingBudget >= 0 ? "text-green-600" : "text-red-600"}`}
+                className={`text-2xl sm:text-3xl font-bold ${
+                  remainingBudget >= 0 ? "text-green-600" : "text-red-600"
+                }`}
               >
                 ${formatCurrency(Math.abs(remainingBudget))}
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                {remainingBudget >= 0 ? "Disponible este mes" : "Excedido este mes"}
+                {remainingBudget >= 0
+                  ? "Disponible este mes"
+                  : "Excedido este mes"}
               </p>
             </CardContent>
           </Card>
@@ -1172,7 +1328,11 @@ export default function Dashboard() {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h2 className="text-xl sm:text-2xl font-bold">Categorías</h2>
-            <Button variant="outline" size="sm" onClick={() => setShowCategories(!showCategories)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowCategories(!showCategories)}
+            >
               {showCategories ? (
                 <>
                   <ChevronUp className="h-4 w-4 mr-2" />
@@ -1190,30 +1350,48 @@ export default function Dashboard() {
           {showCategories && (
             <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {getOrderedCategories().map(([key, category]) => {
-                const data = calculateCategoryData(key)
-                const IconComponent = iconMap[category.icon as keyof typeof iconMap] || DollarSign
-                const isAhorro = isAhorroCategory(key)
+                const data = calculateCategoryData(key);
+                const IconComponent =
+                  iconMap[category.icon as keyof typeof iconMap] || DollarSign;
+                const isAhorro = isAhorroCategory(key);
 
                 return (
-                  <Card key={key} className="relative hover:shadow-md transition-shadow">
+                  <Card
+                    key={key}
+                    className="relative hover:shadow-md transition-shadow"
+                  >
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium truncate">{category.name}</CardTitle>
+                      <CardTitle className="text-sm font-medium truncate">
+                        {category.name}
+                      </CardTitle>
                       <IconComponent className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                     </CardHeader>
                     <CardContent>
                       {isAhorro ? (
                         <>
-                          <div className="text-lg sm:text-2xl font-bold">${formatCurrency(data.available)}</div>
-                          <p className="text-xs text-muted-foreground">{category.percentage}% de tu sueldo neto</p>
+                          <div className="text-lg sm:text-2xl font-bold">
+                            ${formatCurrency(data.available)}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {category.percentage}% de tu sueldo neto
+                          </p>
                           <div className="mt-4">
                             <Button
                               variant="outline"
                               size="sm"
                               className="w-full bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 dark:border-blue-800"
-                              onClick={() => window.open("https://comparatasas.ar/", "_blank", "noopener,noreferrer")}
+                              onClick={() =>
+                                window.open(
+                                  "https://comparatasas.ar/",
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                )
+                              }
                             >
                               <TrendingUp className="h-4 w-4 mr-2 text-blue-600 dark:text-blue-400" />
-                              <span className="text-blue-600 dark:text-blue-400">Ver Inversiones</span>
+                              <span className="text-blue-600 dark:text-blue-400">
+                                Ver Inversiones
+                              </span>
                             </Button>
                           </div>
                         </>
@@ -1225,19 +1403,26 @@ export default function Dashboard() {
                               ? formatCurrency(data.available)
                               : `(${formatCurrency(Math.abs(data.available))})`}
                           </div>
-                          <p className="text-xs text-muted-foreground">Disponible de ${formatCurrency(data.budget)}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Disponible de ${formatCurrency(data.budget)}
+                          </p>
                           <div className="mt-4">
                             <div className="flex justify-between text-xs mb-1">
-                              <span>Gastado: ${formatCurrency(data.spent)}</span>
+                              <span>
+                                Gastado: ${formatCurrency(data.spent)}
+                              </span>
                               <span>{data.percentage.toFixed(1)}%</span>
                             </div>
                             <Progress
                               value={Math.min(data.percentage, 100)}
-                              className={`h-2 ${data.percentage > 100 ? "bg-destructive/20" : ""}`}
+                              className={`h-2 ${
+                                data.percentage > 100 ? "bg-destructive/20" : ""
+                              }`}
                             />
                             {data.percentage > 100 && (
                               <p className="text-xs text-destructive mt-1">
-                                Excedido por ${formatCurrency(data.spent - data.budget)}
+                                Excedido por $
+                                {formatCurrency(data.spent - data.budget)}
                               </p>
                             )}
                           </div>
@@ -1245,7 +1430,7 @@ export default function Dashboard() {
                       )}
                     </CardContent>
                   </Card>
-                )
+                );
               })}
             </div>
           )}
@@ -1256,7 +1441,10 @@ export default function Dashboard() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h2 className="text-xl sm:text-2xl font-bold">Transacciones</h2>
 
-            <Dialog open={showTransactionDialog} onOpenChange={setShowTransactionDialog}>
+            <Dialog
+              open={showTransactionDialog}
+              onOpenChange={setShowTransactionDialog}
+            >
               <DialogTrigger asChild>
                 <Button className="w-full sm:w-auto" size="lg">
                   <Plus className="h-4 w-4 mr-2" />
@@ -1266,7 +1454,9 @@ export default function Dashboard() {
               <DialogContent className="w-[95vw] max-w-md mx-auto">
                 <DialogHeader>
                   <DialogTitle>Nueva Transacción</DialogTitle>
-                  <DialogDescription>Registra un ingreso o gasto</DialogDescription>
+                  <DialogDescription>
+                    Registra un ingreso o gasto
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   {/* Tipo de transacción */}
@@ -1275,7 +1465,11 @@ export default function Dashboard() {
                     <Select
                       value={newTransaction.type}
                       onValueChange={(value: "income" | "expense") =>
-                        setNewTransaction({ ...newTransaction, type: value, category: "" })
+                        setNewTransaction({
+                          ...newTransaction,
+                          type: value,
+                          category: "",
+                        })
                       }
                     >
                       <SelectTrigger>
@@ -1303,8 +1497,13 @@ export default function Dashboard() {
                     <div className="space-y-2">
                       <Label htmlFor="category">Categoría *</Label>
                       <Select
-                        value={newTransaction.category}
-                        onValueChange={(value) => setNewTransaction({ ...newTransaction, category: value })}
+                        value={newTransaction.category as string}
+                        onValueChange={(value) =>
+                          setNewTransaction({
+                            ...newTransaction,
+                            category: value,
+                          })
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Selecciona una categoría" />
@@ -1313,7 +1512,10 @@ export default function Dashboard() {
                           {getSpendableCategories().map(([key, category]) => (
                             <SelectItem key={key} value={key}>
                               <div className="flex items-center space-x-2">
-                                {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
+                                {React.createElement(
+                                  iconMap[category.icon] || DollarSign,
+                                  { className: "h-4 w-4" }
+                                )}
                                 <span>{category.name}</span>
                               </div>
                             </SelectItem>
@@ -1329,10 +1531,13 @@ export default function Dashboard() {
                     <Input
                       id="amount"
                       type="text"
-                      value={newTransaction.amount}
+                      value={newTransaction.amount as string}
                       onChange={(e) =>
                         handleAmountChange(e.target.value, (value) =>
-                          setNewTransaction({ ...newTransaction, amount: value }),
+                          setNewTransaction({
+                            ...newTransaction,
+                            amount: value,
+                          })
                         )
                       }
                       placeholder="Ej: 1.500 o 1.500,50"
@@ -1345,9 +1550,16 @@ export default function Dashboard() {
                     <Input
                       id="description"
                       value={newTransaction.description}
-                      onChange={(e) => setNewTransaction({ ...newTransaction, description: e.target.value })}
+                      onChange={(e) =>
+                        setNewTransaction({
+                          ...newTransaction,
+                          description: e.target.value,
+                        })
+                      }
                       placeholder={
-                        newTransaction.type === "income" ? "Ej: Aguinaldo, regalo, etc." : "Descripción del gasto"
+                        newTransaction.type === "income"
+                          ? "Ej: Aguinaldo, regalo, etc."
+                          : "Descripción del gasto"
                       }
                     />
                   </div>
@@ -1357,7 +1569,12 @@ export default function Dashboard() {
                     <Switch
                       id="recurring"
                       checked={newTransaction.isRecurring}
-                      onCheckedChange={(checked) => setNewTransaction({ ...newTransaction, isRecurring: checked })}
+                      onCheckedChange={(checked) =>
+                        setNewTransaction({
+                          ...newTransaction,
+                          isRecurring: checked,
+                        })
+                      }
                     />
                     <Label htmlFor="recurring" className="text-sm">
                       <div className="flex items-center space-x-2">
@@ -1370,7 +1587,9 @@ export default function Dashboard() {
                   {/* Día de recurrencia (solo si es recurrente) */}
                   {newTransaction.isRecurring && (
                     <div className="space-y-2">
-                      <Label htmlFor="recurring-day">Día del mes para repetir (1-28)</Label>
+                      <Label htmlFor="recurring-day">
+                        Día del mes para repetir (1-28)
+                      </Label>
                       <Input
                         id="recurring-day"
                         type="number"
@@ -1378,9 +1597,12 @@ export default function Dashboard() {
                         max="28"
                         value={newTransaction.recurringDay || 1}
                         onChange={(e) => {
-                          const day = Number.parseInt(e.target.value)
+                          const day = Number.parseInt(e.target.value);
                           if (day >= 1 && day <= 28) {
-                            setNewTransaction({ ...newTransaction, recurringDay: day })
+                            setNewTransaction({
+                              ...newTransaction,
+                              recurringDay: day,
+                            });
                           }
                         }}
                         placeholder="Ej: 15"
@@ -1388,14 +1610,21 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  <Button onClick={addTransaction} className="w-full" disabled={addingTransaction} size="lg">
+                  <Button
+                    onClick={addTransaction}
+                    className="w-full"
+                    disabled={addingTransaction}
+                    size="lg"
+                  >
                     {addingTransaction ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Agregando...
                       </>
                     ) : (
-                      `Agregar ${newTransaction.type === "income" ? "Ingreso" : "Gasto"}`
+                      `Agregar ${
+                        newTransaction.type === "income" ? "Ingreso" : "Gasto"
+                      }`
                     )}
                   </Button>
                 </div>
@@ -1429,7 +1658,10 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <Select value={filterCategory} onValueChange={setFilterCategory}>
+                <Select
+                  value={filterCategory}
+                  onValueChange={setFilterCategory}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Categoría" />
                   </SelectTrigger>
@@ -1438,7 +1670,10 @@ export default function Dashboard() {
                     {getOrderedCategories().map(([key, category]) => (
                       <SelectItem key={key} value={key}>
                         <div className="flex items-center space-x-2">
-                          {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
+                          {React.createElement(
+                            iconMap[category.icon] || DollarSign,
+                            { className: "h-4 w-4" }
+                          )}
                           <span>{category.name}</span>
                         </div>
                       </SelectItem>
@@ -1450,14 +1685,17 @@ export default function Dashboard() {
                   type="text"
                   placeholder="dd/mm/yyyy"
                   value={filterDate}
-                  onChange={(e) => setFilterDate(formatDateInput(e.target.value))}
+                  onChange={(e) =>
+                    setFilterDate(formatDateInput(e.target.value))
+                  }
                   maxLength={10}
                 />
               </div>
 
               {filteredTransactions.length !== transactions.length && (
                 <p className="text-sm text-muted-foreground">
-                  Mostrando {filteredTransactions.length} de {transactions.length} transacciones
+                  Mostrando {filteredTransactions.length} de{" "}
+                  {transactions.length} transacciones
                 </p>
               )}
             </div>
@@ -1480,7 +1718,11 @@ export default function Dashboard() {
                       : "Prueba cambiando los filtros o términos de búsqueda"}
                   </p>
                   {(filterCategory !== "all" || filterDate || searchTerm) && (
-                    <Button variant="outline" onClick={clearFilters} className="mt-4">
+                    <Button
+                      variant="outline"
+                      onClick={clearFilters}
+                      className="mt-4"
+                    >
                       Limpiar filtros
                     </Button>
                   )}
@@ -1498,43 +1740,63 @@ export default function Dashboard() {
                             <ArrowRightCircle className="h-5 w-5 text-green-600" />
                           ) : (
                             React.createElement(
-                              iconMap[config.categories[transaction.category!]?.icon as keyof typeof iconMap] ||
-                                DollarSign,
-                              { className: "h-5 w-5" },
+                              iconMap[
+                                config.categories[transaction.category!]
+                                  ?.icon as keyof typeof iconMap
+                              ] || DollarSign,
+                              { className: "h-5 w-5" }
                             )
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center space-x-2">
-                            <p className="font-medium truncate">{transaction.description}</p>
-                            {transaction.isRecurring && <Repeat className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+                            <p className="font-medium truncate">
+                              {transaction.description}
+                            </p>
+                            {transaction.isRecurring && (
+                              <Repeat className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                            )}
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            {transaction.type === "income" ? "Ingreso" : config.categories[transaction.category!]?.name}{" "}
-                            • {new Date(transaction.date).toLocaleDateString("es-AR")}
-                            {transaction.isRecurring && ` • Día ${transaction.recurringDay || 1}`}
+                            {transaction.type === "income"
+                              ? "Ingreso"
+                              : config.categories[transaction.category!]
+                                  ?.name}{" "}
+                            •{" "}
+                            {new Date(transaction.date).toLocaleDateString(
+                              "es-AR"
+                            )}
+                            {transaction.isRecurring &&
+                              ` • Día ${transaction.recurringDay || 1}`}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 flex-shrink-0">
                         <span
                           className={`font-semibold text-sm sm:text-base ${
-                            transaction.type === "income" ? "text-green-600" : "text-red-600"
+                            transaction.type === "income"
+                              ? "text-green-600"
+                              : "text-red-600"
                           }`}
                         >
-                          {transaction.type === "income" ? "+" : "-"}${formatCurrency(transaction.amount)}
+                          {transaction.type === "income" ? "+" : "-"}$
+                          {formatCurrency(transaction.amount)}
                         </span>
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            setEditingTransaction(transaction)
-                            setShowEditDialog(true)
+                            setEditingTransaction(transaction);
+                            setShowEditDialog(true);
                           }}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => deleteTransaction(transaction.id)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteTransaction(transaction.id)}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -1552,20 +1814,30 @@ export default function Dashboard() {
             <DialogHeader>
               <DialogTitle>Restablecer Datos</DialogTitle>
               <DialogDescription>
-                Esto eliminará todas tus transacciones registradas. Esta acción no se puede deshacer.
+                Esto eliminará todas tus transacciones registradas. Esta acción
+                no se puede deshacer.
               </DialogDescription>
             </DialogHeader>
             <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mb-4">
               <p className="text-sm text-destructive">
-                <strong>¡Atención!</strong> Se eliminarán todas las transacciones pero se mantendrá tu configuración de
-                sueldo y categorías.
+                <strong>¡Atención!</strong> Se eliminarán todas las
+                transacciones pero se mantendrá tu configuración de sueldo y
+                categorías.{" "}
               </p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setShowResetDialog(false)} className="flex-1">
+              <Button
+                variant="outline"
+                onClick={() => setShowResetDialog(false)}
+                className="flex-1"
+              >
                 Cancelar
               </Button>
-              <Button variant="destructive" onClick={resetAllData} className="flex-1">
+              <Button
+                variant="destructive"
+                onClick={resetAllData}
+                className="flex-1"
+              >
                 Restablecer
               </Button>
             </div>
@@ -1577,7 +1849,9 @@ export default function Dashboard() {
           <DialogContent className="w-[95vw] max-w-md mx-auto">
             <DialogHeader>
               <DialogTitle>Editar Transacción</DialogTitle>
-              <DialogDescription>Modifica los datos de la transacción seleccionada</DialogDescription>
+              <DialogDescription>
+                Modifica los datos de la transacción seleccionada
+              </DialogDescription>
             </DialogHeader>
             {editingTransaction && (
               <div className="space-y-4">
@@ -1590,7 +1864,10 @@ export default function Dashboard() {
                       setEditingTransaction({
                         ...editingTransaction,
                         type: value,
-                        category: value === "income" ? undefined : editingTransaction.category,
+                        category:
+                          value === "income"
+                            ? undefined
+                            : editingTransaction.category,
                       })
                     }
                   >
@@ -1620,7 +1897,12 @@ export default function Dashboard() {
                     <Label htmlFor="edit-category">Categoría</Label>
                     <Select
                       value={editingTransaction.category || ""}
-                      onValueChange={(value) => setEditingTransaction({ ...editingTransaction, category: value })}
+                      onValueChange={(value) =>
+                        setEditingTransaction({
+                          ...editingTransaction,
+                          category: value,
+                        })
+                      }
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Selecciona una categoría" />
@@ -1629,7 +1911,10 @@ export default function Dashboard() {
                         {getSpendableCategories().map(([key, category]) => (
                           <SelectItem key={key} value={key}>
                             <div className="flex items-center space-x-2">
-                              {React.createElement(iconMap[category.icon] || DollarSign, { className: "h-4 w-4" })}
+                              {React.createElement(
+                                iconMap[category.icon] || DollarSign,
+                                { className: "h-4 w-4" }
+                              )}
                               <span>{category.name}</span>
                             </div>
                           </SelectItem>
@@ -1647,11 +1932,11 @@ export default function Dashboard() {
                     type="text"
                     value={formatForInput(editingTransaction.amount)}
                     onChange={(e) => {
-                      const formatted = formatInputValue(e.target.value)
+                      const formatted = formatInputValue(e.target.value);
                       setEditingTransaction({
                         ...editingTransaction,
                         amount: parseFormattedValue(formatted),
-                      })
+                      });
                     }}
                     placeholder="Ej: 1.500 o 1.500,50"
                   />
@@ -1663,7 +1948,12 @@ export default function Dashboard() {
                   <Input
                     id="edit-description"
                     value={editingTransaction.description}
-                    onChange={(e) => setEditingTransaction({ ...editingTransaction, description: e.target.value })}
+                    onChange={(e) =>
+                      setEditingTransaction({
+                        ...editingTransaction,
+                        description: e.target.value,
+                      })
+                    }
                     placeholder="Descripción de la transacción"
                   />
                 </div>
@@ -1674,7 +1964,10 @@ export default function Dashboard() {
                     id="edit-recurring"
                     checked={editingTransaction.isRecurring || false}
                     onCheckedChange={(checked) =>
-                      setEditingTransaction({ ...editingTransaction, isRecurring: checked })
+                      setEditingTransaction({
+                        ...editingTransaction,
+                        isRecurring: checked,
+                      })
                     }
                   />
                   <Label htmlFor="edit-recurring" className="text-sm">
@@ -1688,7 +1981,9 @@ export default function Dashboard() {
                 {/* Día de recurrencia (solo si es recurrente) */}
                 {editingTransaction.isRecurring && (
                   <div className="space-y-2">
-                    <Label htmlFor="edit-recurring-day">Día del mes para repetir (1-28)</Label>
+                    <Label htmlFor="edit-recurring-day">
+                      Día del mes para repetir (1-28)
+                    </Label>
                     <Input
                       id="edit-recurring-day"
                       type="number"
@@ -1696,9 +1991,12 @@ export default function Dashboard() {
                       max="28"
                       value={editingTransaction.recurringDay || 1}
                       onChange={(e) => {
-                        const day = Number.parseInt(e.target.value)
+                        const day = Number.parseInt(e.target.value);
                         if (day >= 1 && day <= 28) {
-                          setEditingTransaction({ ...editingTransaction, recurringDay: day })
+                          setEditingTransaction({
+                            ...editingTransaction,
+                            recurringDay: day,
+                          });
                         }
                       }}
                       placeholder="Ej: 15"
@@ -1706,7 +2004,11 @@ export default function Dashboard() {
                   </div>
                 )}
 
-                <Button onClick={updateTransaction} className="w-full" size="lg">
+                <Button
+                  onClick={updateTransaction}
+                  className="w-full"
+                  size="lg"
+                >
                   Actualizar Transacción
                 </Button>
               </div>
@@ -1715,5 +2017,5 @@ export default function Dashboard() {
         </Dialog>
       </main>
     </div>
-  )
+  );
 }
