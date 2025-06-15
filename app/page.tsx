@@ -1,5 +1,6 @@
 "use client";
 
+import { LogoNavbar } from "@/components/logo-navbar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +29,7 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
 } from "firebase/auth";
+import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useState } from "react";
@@ -45,6 +47,7 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [tab, setTab] = useState("login");
   const router = useRouter();
 
   useEffect(() => {
@@ -175,149 +178,190 @@ export default function LoginPage() {
       </div>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center">
+          <div className="flex justify-center mb-2">
+            <LogoNavbar className="h-12 w-12" />
+          </div>
           <CardTitle className="text-2xl font-bold">Gestor de Sueldo</CardTitle>
           <CardDescription>
             Administra tu dinero de forma inteligente
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs value={tab} onValueChange={setTab} className="w-full">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Iniciar Sesión</TabsTrigger>
-              <TabsTrigger value="register">Registrarse</TabsTrigger>
+              <TabsTrigger
+                value="login"
+                onClick={() => setTab("login")}
+                className={tab === "login" ? "text-primary" : ""}
+              >
+                Iniciar Sesión
+              </TabsTrigger>
+              <TabsTrigger
+                value="register"
+                onClick={() => setTab("register")}
+                className={tab === "register" ? "text-primary" : ""}
+              >
+                Registrarse
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={loginEmail}
-                    placeholder="tu@email.com"
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Contraseña</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                {error && (
-                  <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-                    <p className="text-sm text-destructive">{error}</p>
-                  </div>
+              <AnimatePresence mode="wait">
+                {tab === "login" && (
+                  <motion.form
+                    key="login"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    onSubmit={handleLogin}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={loginEmail}
+                        placeholder="tu@email.com"
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Contraseña</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    {error && (
+                      <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                        <p className="text-sm text-destructive">{error}</p>
+                      </div>
+                    )}
+                    <Button type="submit" className="w-full" disabled={loading}>
+                      {loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Iniciar Sesión"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-2 flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 dark:border-blue-800 rounded-md shadow-sm transition font-semibold min-h-[44px]"
+                      onClick={handleGoogleLogin}
+                      disabled={loading}
+                    >
+                      <svg
+                        className="h-5 w-5 mr-2"
+                        viewBox="0 0 48 48"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <path
+                          d="M24 9.5c4.1 0 7.1 1.7 8.7 3.1l6.5-6.5C35.7 2.7 30.3 0 24 0 14.8 0 6.6 5.8 2.7 14.1l7.6 5.9C12.7 14.1 17.8 9.5 24 9.5Z"
+                          fill="#60a5fa"
+                        />
+                        <path
+                          d="M46.5 24.5c0-1.8-.2-3.5-.5-5.1H24v9.6h12.9c-.6 3.1-2.5 5.7-5.2 7.5l7.9 6.1C44.4 38.1 46.5 31.9 46.5 24.5Z"
+                          fill="#60a5fa"
+                        />
+                        <path
+                          d="M10.6 28.5c-1.1-3.3-1.1-6.8 0-10.1l-7.6-5.9C1.1 17.7 0 20.8 0 24c0 3.2 1.1 6.3 3 8.9l7.6-5.9Z"
+                          fill="#60a5fa"
+                        />
+                        <path
+                          d="M24 48c6.3 0 11.7-2.1 15.6-5.7l-7.9-6.1c-2.2 1.5-5 2.4-7.7 2.4-7.1 0-13.2-5.1-14.9-11.9l-7.6 5.9C6.6 42.2 14.8 48 24 48Z"
+                          fill="#60a5fa"
+                        />
+                        <path d="M0 0h48v48H0z" fill="none" />
+                      </svg>
+                      <span className="text-blue-600 dark:text-blue-400">
+                        {loading ? "Cargando..." : "Continuar con Google"}
+                      </span>
+                    </Button>
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => setForgotPasswordOpen(true)}
+                        className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        ¿Olvidaste tu contraseña?
+                      </button>
+                    </div>
+                  </motion.form>
                 )}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Iniciar Sesión"
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full mt-2 flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 dark:border-blue-800 rounded-md shadow-sm transition font-semibold min-h-[44px]"
-                  onClick={handleGoogleLogin}
-                  disabled={loading}
-                >
-                  <svg
-                    className="h-5 w-5 mr-2"
-                    viewBox="0 0 48 48"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      d="M24 9.5c4.1 0 7.1 1.7 8.7 3.1l6.5-6.5C35.7 2.7 30.3 0 24 0 14.8 0 6.6 5.8 2.7 14.1l7.6 5.9C12.7 14.1 17.8 9.5 24 9.5Z"
-                      fill="#60a5fa"
-                    />
-                    <path
-                      d="M46.5 24.5c0-1.8-.2-3.5-.5-5.1H24v9.6h12.9c-.6 3.1-2.5 5.7-5.2 7.5l7.9 6.1C44.4 38.1 46.5 31.9 46.5 24.5Z"
-                      fill="#60a5fa"
-                    />
-                    <path
-                      d="M10.6 28.5c-1.1-3.3-1.1-6.8 0-10.1l-7.6-5.9C1.1 17.7 0 20.8 0 24c0 3.2 1.1 6.3 3 8.9l7.6-5.9Z"
-                      fill="#60a5fa"
-                    />
-                    <path
-                      d="M24 48c6.3 0 11.7-2.1 15.6-5.7l-7.9-6.1c-2.2 1.5-5 2.4-7.7 2.4-7.1 0-13.2-5.1-14.9-11.9l-7.6 5.9C6.6 42.2 14.8 48 24 48Z"
-                      fill="#60a5fa"
-                    />
-                    <path d="M0 0h48v48H0z" fill="none" />
-                  </svg>
-                  <span className="text-blue-600 dark:text-blue-400">
-                    {loading ? "Cargando..." : "Continuar con Google"}
-                  </span>
-                </Button>
-                <div className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => setForgotPasswordOpen(true)}
-                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
-                  >
-                    ¿Olvidaste tu contraseña?
-                  </button>
-                </div>
-              </form>
+              </AnimatePresence>
             </TabsContent>
 
             <TabsContent value="register">
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="register-email">Email</Label>
-                  <Input
-                    id="register-email"
-                    type="email"
-                    value={registerEmail}
-                    onChange={(e) => setRegisterEmail(e.target.value)}
-                    required
-                    placeholder="tu@email.com"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="register-password">Contraseña</Label>
-                  <Input
-                    id="register-password"
-                    type="password"
-                    value={registerPassword}
-                    onChange={(e) => setRegisterPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="register-password-confirm">
-                    Confirmar Contraseña
-                  </Label>
-                  <Input
-                    id="register-password-confirm"
-                    type="password"
-                    value={registerPasswordConfirm}
-                    onChange={(e) => setRegisterPasswordConfirm(e.target.value)}
-                    required
-                  />
-                </div>
-                {error && (
-                  <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-                    <p className="text-sm text-destructive">{error}</p>
-                  </div>
+              <AnimatePresence mode="wait">
+                {tab === "register" && (
+                  <motion.form
+                    key="register"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    onSubmit={handleRegister}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="register-email">Email</Label>
+                      <Input
+                        id="register-email"
+                        type="email"
+                        value={registerEmail}
+                        onChange={(e) => setRegisterEmail(e.target.value)}
+                        required
+                        placeholder="tu@email.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="register-password">Contraseña</Label>
+                      <Input
+                        id="register-password"
+                        type="password"
+                        value={registerPassword}
+                        onChange={(e) => setRegisterPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="register-password-confirm">
+                        Confirmar Contraseña
+                      </Label>
+                      <Input
+                        id="register-password-confirm"
+                        type="password"
+                        value={registerPasswordConfirm}
+                        onChange={(e) =>
+                          setRegisterPasswordConfirm(e.target.value)
+                        }
+                        required
+                      />
+                    </div>
+                    {error && (
+                      <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                        <p className="text-sm text-destructive">{error}</p>
+                      </div>
+                    )}
+                    <Button type="submit" className="w-full" disabled={loading}>
+                      {loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Crear Cuenta"
+                      )}
+                    </Button>
+                  </motion.form>
                 )}
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Crear Cuenta"
-                  )}
-                </Button>
-              </form>
+              </AnimatePresence>
             </TabsContent>
           </Tabs>
         </CardContent>

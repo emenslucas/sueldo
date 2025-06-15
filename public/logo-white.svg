@@ -1,0 +1,7 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="16" fill="#fff"/>
+  <path d="M18 40C18 32 28 32 28 40C28 48 18 48 18 40Z" fill="#60A5FA"/>
+  <path d="M46 24C46 32 36 32 36 24C36 16 46 16 46 24Z" fill="#FBBF24"/>
+  <path d="M20 32C20 24 44 24 44 32C44 40 20 40 20 32Z" fill="#A21CAF"/>
+  <text x="32" y="38" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="22" fill="#18181B" font-weight="bold" letter-spacing="-2">GS</text>
+</svg>

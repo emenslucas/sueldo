@@ -1,6 +1,7 @@
 "use client";
 
 import { DraggableCategory } from "@/components/draggable-category";
+import { LogoNavbar } from "@/components/logo-navbar";
 import { SalaryCalculator } from "@/components/salary-calculator";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -48,6 +49,7 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
+import { motion } from "framer-motion";
 import {
   AlertCircle,
   ArrowLeftCircle,
@@ -995,7 +997,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4, ease: "easeInOut" }}
+      className="min-h-screen bg-background"
+    >
       {/* Mensajes de error y éxito optimizados */}
       {user && !loading && error && (
         <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
@@ -1020,6 +1027,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
+              <LogoNavbar />
               <h1 className="text-lg sm:text-xl font-semibold">
                 Gestor de Sueldo
               </h1>
@@ -2036,6 +2044,6 @@ export default function Dashboard() {
           </DialogContent>
         </Dialog>
       </main>
-    </div>
+    </motion.div>
   );
 }
