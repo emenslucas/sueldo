@@ -49,7 +49,7 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
   ArrowLeftCircle,
@@ -1370,93 +1370,103 @@ export default function Dashboard() {
             </Button>
           </div>
 
-          {showCategories && (
-            <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {getOrderedCategories().map(([key, category]) => {
-                const data = calculateCategoryData(key);
-                const IconComponent =
-                  iconMap[category.icon as keyof typeof iconMap] || DollarSign;
-                const isAhorro = isAhorroCategory(key);
+          <AnimatePresence initial={false}>
+            {showCategories && (
+              <motion.div
+                key="categories"
+                layout
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.4, ease: "easeInOut" }}
+                className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 overflow-hidden"
+              >
+                {getOrderedCategories().map(([key, category]) => {
+                  const data = calculateCategoryData(key);
+                  const IconComponent =
+                    iconMap[category.icon as keyof typeof iconMap] || DollarSign;
+                  const isAhorro = isAhorroCategory(key);
 
-                return (
-                  <Card
-                    key={key}
-                    className="relative hover:shadow-md transition-shadow"
-                  >
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm font-medium truncate">
-                        {category.name}
-                      </CardTitle>
-                      <IconComponent className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    </CardHeader>
-                    <CardContent>
-                      {isAhorro ? (
-                        <>
-                          <div className="text-lg sm:text-2xl font-bold">
-                            ${formatCurrency(data.available)}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {category.percentage}% de tu sueldo neto
-                          </p>
-                          <div className="mt-4">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 dark:border-blue-800"
-                              onClick={() =>
-                                window.open(
-                                  "https://comparatasas.ar/",
-                                  "_blank",
-                                  "noopener,noreferrer"
-                                )
-                              }
-                            >
-                              <TrendingUp className="h-4 w-4 mr-2 text-blue-600 dark:text-blue-400" />
-                              <span className="text-blue-600 dark:text-blue-400">
-                                Ver Inversiones
-                              </span>
-                            </Button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-lg sm:text-2xl font-bold">
-                            $
-                            {data.available >= 0
-                              ? formatCurrency(data.available)
-                              : `(${formatCurrency(Math.abs(data.available))})`}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Disponible de ${formatCurrency(data.budget)}
-                          </p>
-                          <div className="mt-4">
-                            <div className="flex justify-between text-xs mb-1">
-                              <span>
-                                Gastado: ${formatCurrency(data.spent)}
-                              </span>
-                              <span>{data.percentage.toFixed(1)}%</span>
+                  return (
+                    <Card
+                      key={key}
+                      className="relative hover:shadow-md transition-shadow"
+                    >
+                      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium truncate">
+                          {category.name}
+                        </CardTitle>
+                        <IconComponent className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      </CardHeader>
+                      <CardContent>
+                        {isAhorro ? (
+                          <>
+                            <div className="text-lg sm:text-2xl font-bold">
+                              ${formatCurrency(data.available)}
                             </div>
-                            <Progress
-                              value={Math.min(data.percentage, 100)}
-                              className={`h-2 ${
-                                data.percentage > 100 ? "bg-destructive/20" : ""
-                              }`}
-                            />
-                            {data.percentage > 100 && (
-                              <p className="text-xs text-destructive mt-1">
-                                Excedido por $
-                                {formatCurrency(data.spent - data.budget)}
-                              </p>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
+                            <p className="text-xs text-muted-foreground">
+                              {category.percentage}% de tu sueldo neto
+                            </p>
+                            <div className="mt-4">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full bg-blue-50 hover:bg-blue-100 border-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 dark:border-blue-800"
+                                onClick={() =>
+                                  window.open(
+                                    "https://comparatasas.ar/",
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                <TrendingUp className="h-4 w-4 mr-2 text-blue-600 dark:text-blue-400" />
+                                <span className="text-blue-600 dark:text-blue-400">
+                                  Ver Inversiones
+                                </span>
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-lg sm:text-2xl font-bold">
+                              $
+                              {data.available >= 0
+                                ? formatCurrency(data.available)
+                                : `(${formatCurrency(Math.abs(data.available))})`}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Disponible de ${formatCurrency(data.budget)}
+                            </p>
+                            <div className="mt-4">
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>
+                                  Gastado: ${formatCurrency(data.spent)}
+                                </span>
+                                <span>{data.percentage.toFixed(1)}%</span>
+                              </div>
+                              <Progress
+                                value={Math.min(data.percentage, 100)}
+                                className={`h-2 ${
+                                  data.percentage > 100 ? "bg-destructive/20" : ""
+                                }`}
+                              />
+                              {data.percentage > 100 && (
+                                <p className="text-xs text-destructive mt-1">
+                                  Excedido por $
+                                  {formatCurrency(data.spent - data.budget)}
+                                </p>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Sección de transacciones unificada */}
