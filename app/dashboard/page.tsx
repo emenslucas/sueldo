@@ -109,6 +109,7 @@ interface Transaction {
 }
 
 // Interfaz para la configuración guardada (con números)
+// Added resetDay and lastResetDate to UserConfig interface
 interface UserConfig {
   salary: number;
   monotributo: number;
@@ -116,12 +117,19 @@ interface UserConfig {
     [key: string]: Category;
   };
   categoryOrder?: string[];
+  resetDay?: number; // Day of month to reset transactions
+  lastResetDate?: string; // ISO string of last reset date
+  autoResetEnabled?: boolean; // Whether automatic reset is enabled
 }
 
 // CORRECCIÓN: Interfaz para el estado del formulario de configuración (con strings)
+// Added resetDay and lastResetDate to TempUserConfig interface
 interface TempUserConfig extends Omit<UserConfig, "salary" | "monotributo"> {
   salary: string;
   monotributo: string;
+  resetDay?: number;
+  lastResetDate?: string;
+  autoResetEnabled?: boolean;
 }
 
 const defaultCategories = {
@@ -346,6 +354,75 @@ export default function Dashboard() {
         setUnsubscribeTransactions(() => unsubscribeTx);
         const unsubscribeSG = loadSavingsGoals(user.uid);
         setUnsubscribeSavingsGoals(() => unsubscribeSG);
+
+        // New logic: check and perform scheduled reset if needed
+        if (config && config.resetDay && config.autoResetEnabled) {
+          const today = new Date();
+          const resetDay = config.resetDay;
+          const lastResetDate = config.lastResetDate
+            ? new Date(config.lastResetDate)
+            : null;
+
+          // Check if today is past resetDay and lastResetDate is before current month
+          if (
+            today.getDate() >= resetDay &&
+            (!lastResetDate ||
+              lastResetDate.getMonth() !== today.getMonth() ||
+              lastResetDate.getFullYear() !== today.getFullYear())
+          ) {
+            // Delete transactions from previous month
+            const previousMonth = new Date(
+              today.getFullYear(),
+              today.getMonth() - 1,
+              1
+            );
+            const startOfPrevMonth = new Date(
+              previousMonth.getFullYear(),
+              previousMonth.getMonth(),
+              1
+            );
+            const endOfPrevMonth = new Date(
+              previousMonth.getFullYear(),
+              previousMonth.getMonth() + 1,
+              0,
+              23,
+              59,
+              59
+            );
+
+            try {
+              const q = query(
+                collection(db, "transactions"),
+                where("userId", "==", user.uid),
+                where("date", ">=", startOfPrevMonth.toISOString()),
+                where("date", "<=", endOfPrevMonth.toISOString())
+              );
+              const querySnapshot = await getDocs(q);
+
+              const deletePromises = querySnapshot.docs.map((doc) =>
+                deleteDoc(doc.ref)
+              );
+              await Promise.all(deletePromises);
+
+              // Update lastResetDate in user config
+              const userDocRef = doc(db, "users", user.uid);
+              await setDoc(
+                userDocRef,
+                { lastResetDate: today.toISOString() },
+                { merge: true }
+              );
+
+              setSuccess(
+                "Transacciones del mes pasado restablecidas automáticamente"
+              );
+            } catch (error) {
+              console.error("Error during scheduled reset:", error);
+              setError(
+                "Error al restablecer las transacciones automáticamente"
+              );
+            }
+          }
+        }
       } else {
         if (unsubscribeTransactions) {
           unsubscribeTransactions();
@@ -372,7 +449,7 @@ export default function Dashboard() {
         unsubscribeSavingsGoals();
       }
     };
-  }, [router, loadSavingsGoals]);
+  }, [router, loadSavingsGoals, config]);
 
   // Limpiar mensajes después de 5 segundos
   useEffect(() => {
@@ -439,6 +516,8 @@ export default function Dashboard() {
       ...tempConfig,
       salary: parseFormattedValue(tempConfig.salary),
       monotributo: parseFormattedValue(tempConfig.monotributo),
+      resetDay: tempConfig.resetDay,
+      lastResetDate: tempConfig.lastResetDate,
     };
 
     try {
@@ -1344,6 +1423,25 @@ export default function Dashboard() {
                     placeholder="Ingresa el monto del monotributo"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="resetDay">Día de restablecimiento</Label>
+                  <Input
+                    id="resetDay"
+                    type="number"
+                    min={1}
+                    max={28}
+                    value={tempConfig.resetDay || ""}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (value >= 1 && value <= 28) {
+                        setTempConfig({ ...tempConfig, resetDay: value });
+                      } else if (e.target.value === "") {
+                        setTempConfig({ ...tempConfig, resetDay: undefined });
+                      }
+                    }}
+                    placeholder="Ej: 15"
+                  />
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -2159,12 +2257,58 @@ export default function Dashboard() {
                 no se puede deshacer.
               </DialogDescription>
             </DialogHeader>
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mb-4">
-              <p className="text-sm text-destructive">
-                <strong>¡Atención!</strong> Se eliminarán todas las
-                transacciones pero se mantendrá tu configuración de sueldo y
-                categorías.{" "}
-              </p>
+            <div className="space-y-4 mb-4">
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                <p className="text-sm text-destructive">
+                  <strong>¡Atención!</strong> Se eliminarán todas las
+                  transacciones pero se mantendrá tu configuración de sueldo y
+                  categorías.{" "}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="auto-reset"
+                  checked={tempConfig?.autoResetEnabled || false}
+                  onCheckedChange={(checked) => {
+                    if (tempConfig) {
+                      setTempConfig({
+                        ...tempConfig,
+                        autoResetEnabled: checked,
+                      });
+                    }
+                  }}
+                />
+                <Label htmlFor="auto-reset" className="text-sm">
+                  Restablecer automáticamente
+                </Label>
+              </div>
+              {tempConfig?.autoResetEnabled && (
+                <div>
+                  <Label htmlFor="reset-day" className="text-sm font-medium">
+                    Día del mes para restablecer (1-28)
+                  </Label>
+                  <Input
+                    id="reset-day"
+                    type="number"
+                    min={1}
+                    max={28}
+                    value={tempConfig?.resetDay || ""}
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      if (value >= 1 && value <= 28) {
+                        if (tempConfig) {
+                          setTempConfig({ ...tempConfig, resetDay: value });
+                        }
+                      } else if (e.target.value === "") {
+                        if (tempConfig) {
+                          setTempConfig({ ...tempConfig, resetDay: undefined });
+                        }
+                      }
+                    }}
+                    placeholder="Ej: 15"
+                  />
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <Button
