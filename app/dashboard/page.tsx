@@ -3,6 +3,7 @@
 import { DraggableCategory } from "@/components/draggable-category";
 import { LogoNavbar } from "@/components/logo-navbar";
 import { SalaryCalculator } from "@/components/salary-calculator";
+import { SavingsGoalsManager } from "@/components/savings-goals/savings-goals-manager";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +46,9 @@ import {
   getDoc,
   getDocs,
   onSnapshot,
+  orderBy,
   query,
+  runTransaction,
   setDoc,
   where,
 } from "firebase/firestore";
@@ -74,7 +77,9 @@ import {
   Search,
   Settings,
   ShoppingBag,
+  Target,
   Trash2,
+  TrendingDown,
   TrendingUp,
   User,
   Utensils,
@@ -92,8 +97,10 @@ interface Category {
 
 interface Transaction {
   id: string;
-  type: "income" | "expense";
+  type: "income" | "expense" | "savings";
   category?: string;
+  goalId?: string; // Para transacciones de ahorro
+  savingsType?: "deposit" | "withdrawal"; // Para transacciones de ahorro
   amount: number;
   description: string;
   date: string;
@@ -175,9 +182,13 @@ export default function Dashboard() {
 
   // Estados para modales
   const [showCalculatorModal, setShowCalculatorModal] = useState(false);
+  const [showObjectivesModal, setShowObjectivesModal] = useState(false);
 
   // Ref para el unsubscribe de Firestore
   const [unsubscribeTransactions, setUnsubscribeTransactions] = useState<
+    (() => void) | null
+  >(null);
+  const [unsubscribeSavingsGoals, setUnsubscribeSavingsGoals] = useState<
     (() => void) | null
   >(null);
 
@@ -191,8 +202,10 @@ export default function Dashboard() {
   const [showTransactionDialog, setShowTransactionDialog] = useState(false);
   const [newTransaction, setNewTransaction] = useState<{
     id?: string;
-    type: "income" | "expense";
+    type: "income" | "expense" | "savings";
     category?: string;
+    goalId?: string;
+    savingsType?: "deposit" | "withdrawal";
     amount: string;
     description: string;
     date: string;
@@ -201,6 +214,8 @@ export default function Dashboard() {
   }>({
     type: "expense",
     category: "",
+    goalId: "",
+    savingsType: "deposit",
     amount: "",
     description: "",
     date: new Date().toISOString(),
@@ -211,11 +226,13 @@ export default function Dashboard() {
     useState<Transaction | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
 
+  const [savingsGoals, setSavingsGoals] = useState<any[]>([]);
+
   // Optimización: Memoizar cálculos costosos
   const netSalary = useMemo(() => {
     if (!config) return 0;
-    return config?.salary - (config?.monotributo || 0);
-  }, [config?.salary, config]);
+    return config.salary - (config.monotributo || 0);
+  }, [config]);
 
   // Función para verificar si una categoría es de ahorro
   const isAhorroCategory = useCallback(
@@ -267,15 +284,53 @@ export default function Dashboard() {
 
   const remainingBudget = useMemo(() => {
     if (!config) return 0;
-    // Sueldo neto + ingresos extra - gastos - ahorro
-    return netSalary + totalIncome - totalExpenses - totalSavings;
-  }, [netSalary, totalIncome, totalExpenses, totalSavings]);
+
+    // Calcular movimientos de ahorro del mes actual
+    const savingsMovements = currentMonthTransactions
+      .filter((transaction) => transaction.type === "savings")
+      .reduce((total, transaction) => {
+        // Los depósitos restan del disponible, los retiros suman
+        return transaction.savingsType === "deposit"
+          ? total + transaction.amount // Suma porque es dinero que sale
+          : total - transaction.amount; // Resta porque es dinero que vuelve
+      }, 0);
+
+    // Sueldo neto + ingresos extra - gastos - ahorro automático - movimientos de ahorro
+    return (
+      netSalary + totalIncome - totalExpenses - totalSavings - savingsMovements
+    );
+  }, [
+    netSalary,
+    totalIncome,
+    totalExpenses,
+    totalSavings,
+    currentMonthTransactions,
+  ]);
 
   // Filtrar categorías que NO son de ahorro para gastos
   const getSpendableCategories = useCallback(() => {
     if (!config) return [];
     return getOrderedCategories().filter(([key]) => !isAhorroCategory(key));
   }, [config, isAhorroCategory]);
+
+  // Load savings goals
+  const loadSavingsGoals = useCallback((userId: string) => {
+    const q = query(
+      collection(db, "savingsGoals"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const goalsData: any[] = [];
+      querySnapshot.forEach((doc) => {
+        goalsData.push({ id: doc.id, ...doc.data() });
+      });
+      setSavingsGoals(goalsData);
+    });
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -287,12 +342,18 @@ export default function Dashboard() {
           // Si el usuario pierde permisos, no mostrar error
           setConfig(null);
         }
-        const unsubscribe = loadTransactions(user.uid);
-        setUnsubscribeTransactions(() => unsubscribe);
+        const unsubscribeTx = loadTransactions(user.uid);
+        setUnsubscribeTransactions(() => unsubscribeTx);
+        const unsubscribeSG = loadSavingsGoals(user.uid);
+        setUnsubscribeSavingsGoals(() => unsubscribeSG);
       } else {
         if (unsubscribeTransactions) {
           unsubscribeTransactions();
           setUnsubscribeTransactions(null);
+        }
+        if (unsubscribeSavingsGoals) {
+          unsubscribeSavingsGoals();
+          setUnsubscribeSavingsGoals(null);
         }
         setConfig(null); // Limpiar config para evitar flashes de error
         setError(null); // Limpiar error
@@ -307,8 +368,11 @@ export default function Dashboard() {
       if (unsubscribeTransactions) {
         unsubscribeTransactions();
       }
+      if (unsubscribeSavingsGoals) {
+        unsubscribeSavingsGoals();
+      }
     };
-  }, [router]);
+  }, [router, loadSavingsGoals]);
 
   // Limpiar mensajes después de 5 segundos
   useEffect(() => {
@@ -396,6 +460,10 @@ export default function Dashboard() {
         unsubscribeTransactions();
         setUnsubscribeTransactions(null);
       }
+      if (unsubscribeSavingsGoals) {
+        unsubscribeSavingsGoals();
+        setUnsubscribeSavingsGoals(null);
+      }
 
       // Limpiar estado local
       setTransactions([]);
@@ -408,7 +476,7 @@ export default function Dashboard() {
       console.error("Error during logout:", error);
       setError("Error al cerrar sesión");
     }
-  }, [unsubscribeTransactions, router]);
+  }, [unsubscribeTransactions, unsubscribeSavingsGoals, router]);
 
   const resetAllData = useCallback(async () => {
     if (!user) return;
@@ -655,6 +723,18 @@ export default function Dashboard() {
         variant="outline"
         size="sm"
         onClick={() => {
+          setShowObjectivesModal(true);
+          setShowMobileMenu(false);
+        }}
+        className="justify-start"
+      >
+        <PiggyBank className="h-4 w-4 mr-2" />
+        Objetivos
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
           setShowResetDialog(true);
           setShowMobileMenu(false);
         }}
@@ -731,15 +811,23 @@ export default function Dashboard() {
     return unsubscribe;
   }, []);
 
-  // Agregar transacción a Firestore
   const addTransaction = useCallback(async () => {
-    if (!user || !newTransaction.amount) {
+    if (!user) {
+      setError("Usuario no autenticado");
+      return;
+    }
+    if (!newTransaction.amount) {
       setError("Por favor completa todos los campos obligatorios");
       return;
     }
 
     if (newTransaction.type === "expense" && !newTransaction.category) {
       setError("Por favor selecciona una categoría para el gasto");
+      return;
+    }
+
+    if (newTransaction.type === "savings" && !newTransaction.goalId) {
+      setError("Por favor selecciona un objetivo de ahorro");
       return;
     }
 
@@ -760,6 +848,22 @@ export default function Dashboard() {
       return;
     }
 
+    // Validar retiros de ahorro
+    if (
+      newTransaction.type === "savings" &&
+      newTransaction.savingsType === "withdrawal"
+    ) {
+      const selectedGoal = savingsGoals.find(
+        (g) => g.id === newTransaction.goalId
+      );
+      if (selectedGoal && amount > selectedGoal.currentAmount) {
+        setError(
+          "No puedes retirar más de lo que tienes ahorrado en este objetivo"
+        );
+        return;
+      }
+    }
+
     // Validar día de recurrencia
     if (newTransaction.isRecurring) {
       const day = newTransaction.recurringDay || 1;
@@ -773,27 +877,90 @@ export default function Dashboard() {
     setError(null);
 
     try {
-      const transactionData: any = {
-        userId: user?.uid ?? "",
-        type: newTransaction.type,
-        category: newTransaction.category || null,
-        amount: amount,
-        description:
-          newTransaction.description ||
-          (newTransaction.type === "income" ? "Ingreso" : "Gasto"),
-        date: new Date().toISOString(),
-        isRecurring: newTransaction.isRecurring || false,
-      };
+      if (newTransaction.type === "savings") {
+        // Usar transacción de Firestore para mantener consistencia
+        await runTransaction(db, async (transaction) => {
+          // Crear la transacción
+          const transactionRef = doc(collection(db, "transactions"));
+          const transactionData: any = {
+            userId: user.uid,
+            type: newTransaction.type,
+            goalId: newTransaction.goalId,
+            savingsType: newTransaction.savingsType,
+            amount: amount,
+            description:
+              newTransaction.description ||
+              (newTransaction.savingsType === "deposit"
+                ? "Depósito a objetivo"
+                : "Retiro de objetivo"),
+            date: new Date().toISOString(),
+            isRecurring: newTransaction.isRecurring || false,
+          };
 
-      if (newTransaction.isRecurring) {
-        transactionData.recurringDay = newTransaction.recurringDay || 1;
+          if (newTransaction.isRecurring) {
+            transactionData.recurringDay = newTransaction.recurringDay || 1;
+          }
+
+          transaction.set(transactionRef, transactionData);
+
+          // Actualizar el objetivo de ahorro
+          const goalRef = doc(db, "savingsGoals", newTransaction.goalId!);
+          const selectedGoal = savingsGoals.find(
+            (g) => g.id === newTransaction.goalId
+          );
+          if (selectedGoal) {
+            const newAmount =
+              newTransaction.savingsType === "deposit"
+                ? selectedGoal.currentAmount + amount
+                : selectedGoal.currentAmount - amount;
+
+            const updateData: any = {
+              currentAmount: Math.max(0, newAmount),
+              updatedAt: new Date().toISOString(),
+            };
+
+            // Marcar como completado si se alcanzó el objetivo
+            if (
+              newAmount >= selectedGoal.targetAmount &&
+              !selectedGoal.isCompleted
+            ) {
+              updateData.isCompleted = true;
+            } else if (
+              newAmount < selectedGoal.targetAmount &&
+              selectedGoal.isCompleted
+            ) {
+              updateData.isCompleted = false;
+            }
+
+            transaction.update(goalRef, updateData);
+          }
+        });
+      } else {
+        // Transacción normal (ingreso o gasto)
+        const transactionData: any = {
+          userId: user.uid,
+          type: newTransaction.type,
+          category: newTransaction.category || null,
+          amount: amount,
+          description:
+            newTransaction.description ||
+            (newTransaction.type === "income" ? "Ingreso" : "Gasto"),
+          date: new Date().toISOString(),
+          isRecurring: newTransaction.isRecurring || false,
+        };
+
+        if (newTransaction.isRecurring) {
+          transactionData.recurringDay = newTransaction.recurringDay || 1;
+        }
+
+        await addDoc(collection(db, "transactions"), transactionData);
       }
-
-      await addDoc(collection(db, "transactions"), transactionData);
 
       setNewTransaction({
         type: "expense",
         category: "",
+        goalId: "",
+        savingsType: "deposit",
         amount: "",
         description: "",
         date: new Date().toISOString(),
@@ -814,7 +981,7 @@ export default function Dashboard() {
     } finally {
       setAddingTransaction(false);
     }
-  }, [user, newTransaction, isAhorroCategory]);
+  }, [user, newTransaction, isAhorroCategory, savingsGoals]);
 
   const deleteTransaction = useCallback(async (transactionId: string) => {
     try {
@@ -827,6 +994,10 @@ export default function Dashboard() {
   }, []);
 
   const updateTransaction = useCallback(async () => {
+    if (!user) {
+      setError("Usuario no autenticado");
+      return;
+    }
     if (!editingTransaction || !editingTransaction.amount) {
       setError("Por favor completa todos los campos obligatorios");
       return;
@@ -1046,6 +1217,14 @@ export default function Dashboard() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setShowObjectivesModal(true)}
+              >
+                <Target className="h-4 w-4 mr-2" />
+                Objetivos
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setShowResetDialog(true)}
               >
                 <Trash2 className="h-4 w-4 mr-2" />
@@ -1108,6 +1287,20 @@ export default function Dashboard() {
           <SalaryCalculator />
         </DialogContent>
       </Dialog>
+
+      {/* Modal de objetivos */}
+      <Dialog open={showObjectivesModal} onOpenChange={setShowObjectivesModal}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="sr-only">Objetivos de Ahorro</DialogTitle>
+            <DialogDescription className="sr-only">
+              Gestiona y visualiza tus metas de ahorro.
+            </DialogDescription>
+          </DialogHeader>
+          {user && <SavingsGoalsManager user={user} />}
+        </DialogContent>
+      </Dialog>
+      {/* Removed redundant "Crear Objetivo" button from savings goals dialog */}
 
       {/* Modal de configuración optimizado */}
       <Dialog open={showConfigDialog} onOpenChange={setShowConfigDialog}>
@@ -1384,7 +1577,8 @@ export default function Dashboard() {
                 {getOrderedCategories().map(([key, category]) => {
                   const data = calculateCategoryData(key);
                   const IconComponent =
-                    iconMap[category.icon as keyof typeof iconMap] || DollarSign;
+                    iconMap[category.icon as keyof typeof iconMap] ||
+                    DollarSign;
                   const isAhorro = isAhorroCategory(key);
 
                   return (
@@ -1433,7 +1627,9 @@ export default function Dashboard() {
                               $
                               {data.available >= 0
                                 ? formatCurrency(data.available)
-                                : `(${formatCurrency(Math.abs(data.available))})`}
+                                : `(${formatCurrency(
+                                    Math.abs(data.available)
+                                  )})`}
                             </div>
                             <p className="text-xs text-muted-foreground mt-1">
                               Disponible de ${formatCurrency(data.budget)}
@@ -1448,7 +1644,9 @@ export default function Dashboard() {
                               <Progress
                                 value={Math.min(data.percentage, 100)}
                                 className={`h-2 ${
-                                  data.percentage > 100 ? "bg-destructive/20" : ""
+                                  data.percentage > 100
+                                    ? "bg-destructive/20"
+                                    : ""
                                 }`}
                               />
                               {data.percentage > 100 && (
@@ -1497,7 +1695,9 @@ export default function Dashboard() {
                     <Label>Tipo de transacción *</Label>
                     <Select
                       value={newTransaction.type}
-                      onValueChange={(value: "income" | "expense") =>
+                      onValueChange={(
+                        value: "income" | "expense" | "savings"
+                      ) =>
                         setNewTransaction({
                           ...newTransaction,
                           type: value,
@@ -1519,6 +1719,12 @@ export default function Dashboard() {
                           <div className="flex items-center space-x-2">
                             <ArrowLeftCircle className="h-4 w-4 text-red-600" />
                             <span>Gasto</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="savings">
+                          <div className="flex items-center space-x-2">
+                            <PiggyBank className="h-4 w-4 text-blue-600" />
+                            <span>Ahorro</span>
                           </div>
                         </SelectItem>
                       </SelectContent>
@@ -1556,6 +1762,75 @@ export default function Dashboard() {
                         </SelectContent>
                       </Select>
                     </div>
+                  )}
+
+                  {/* Objetivo de ahorro (solo para ahorro) */}
+                  {newTransaction.type === "savings" && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="goalId">Objetivo de ahorro *</Label>
+                        <Select
+                          value={newTransaction.goalId as string}
+                          onValueChange={(value) =>
+                            setNewTransaction({
+                              ...newTransaction,
+                              goalId: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecciona un objetivo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {savingsGoals
+                              .filter((goal) => !goal.isCompleted)
+                              .map((goal) => (
+                                <SelectItem key={goal.id} value={goal.id}>
+                                  <div className="flex items-center justify-between w-full">
+                                    <span>{goal.name}</span>
+                                    <span className="text-xs text-muted-foreground ml-2">
+                                      ${formatCurrency(goal.currentAmount)}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="savingsType">
+                          Tipo de movimiento *
+                        </Label>
+                        <Select
+                          value={newTransaction.savingsType as string}
+                          onValueChange={(value: "deposit" | "withdrawal") =>
+                            setNewTransaction({
+                              ...newTransaction,
+                              savingsType: value,
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="deposit">
+                              <div className="flex items-center space-x-2">
+                                <TrendingUp className="h-4 w-4 text-green-600" />
+                                <span>Depósito</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="withdrawal">
+                              <div className="flex items-center space-x-2">
+                                <TrendingDown className="h-4 w-4 text-red-600" />
+                                <span>Retiro</span>
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
                   )}
 
                   {/* Monto */}
@@ -1771,6 +2046,12 @@ export default function Dashboard() {
                         <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center flex-shrink-0">
                           {transaction.type === "income" ? (
                             <ArrowRightCircle className="h-5 w-5 text-green-600" />
+                          ) : transaction.type === "savings" ? (
+                            transaction.savingsType === "deposit" ? (
+                              <TrendingUp className="h-5 w-5 text-blue-600" />
+                            ) : (
+                              <TrendingDown className="h-5 w-5 text-blue-600" />
+                            )
                           ) : (
                             React.createElement(
                               iconMap[
@@ -1793,6 +2074,16 @@ export default function Dashboard() {
                           <p className="text-sm text-muted-foreground sm:block hidden">
                             {transaction.type === "income"
                               ? "Ingreso"
+                              : transaction.type === "savings"
+                              ? `${
+                                  transaction.savingsType === "deposit"
+                                    ? "Depósito"
+                                    : "Retiro"
+                                } - ${
+                                  savingsGoals.find(
+                                    (g) => g.id === transaction.goalId
+                                  )?.name || "Objetivo"
+                                }`
                               : config.categories[transaction.category!]
                                   ?.name}{" "}
                             •{" "}
@@ -1814,11 +2105,21 @@ export default function Dashboard() {
                           className={`font-semibold text-sm sm:text-base ${
                             transaction.type === "income"
                               ? "text-green-600 dark:text-green-400"
+                              : transaction.type === "savings"
+                              ? transaction.savingsType === "deposit"
+                                ? "text-blue-600 dark:text-blue-400"
+                                : "text-blue-600 dark:text-blue-400"
                               : "text-red-600 dark:text-red-400"
                           }`}
                         >
-                          {transaction.type === "income" ? "+" : "-"}$
-                          {formatCurrency(transaction.amount)}
+                          {transaction.type === "income"
+                            ? "+"
+                            : transaction.type === "savings"
+                            ? transaction.savingsType === "deposit"
+                              ? "-"
+                              : "+"
+                            : "-"}
+                          ${formatCurrency(transaction.amount)}
                         </span>
                         <Button
                           variant="ghost"
@@ -1845,6 +2146,8 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Sección de objetivos de ahorro */}
 
         {/* Dialogs */}
         <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
